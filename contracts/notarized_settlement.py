@@ -458,19 +458,31 @@ class NotarizedSettlement(gl.Contract):
             surplus = u256(0)
             shortfall = expected - difference
 
+        host = u256(self.balance)
+        unattributed = host - expected if host >= expected else u256(0)
+
         return {
             "total_received": self.total_received,
             "total_paid_out": paid,
             "outstanding": outstanding,
             "funded_not_paid": funded_not_paid,
-            # What a correct run should always be zero.
+            # Whether the contract's own books add up. Deliberately a separate
+            # question from whether all the value it holds is accounted for:
+            # `balanced` staying true while GEN is unattributed is what it is
+            # supposed to do, and reporting it as false would be a lie about the
+            # books rather than a fix. Read `fully_accounted` for the other half.
             "balanced": surplus == 0 and shortfall == 0,
             "surplus": surplus,
             "shortfall": shortfall,
+            # Measured on StudioNet: GEN attached to a payable call that reverts
+            # lands here and cannot leave — no hook can route it, because there
+            # is no escrow id to route it to. So this is expected to be non-zero
+            # after any failed payable call, and it is reported rather than
+            # folded into the balance.
+            "unattributed": unattributed,
+            "fully_accounted": unattributed == 0,
             "host_balance": self.balance,
-            "host_minus_accounted": u256(self.balance) - expected
-            if u256(self.balance) >= expected
-            else u256(0),
+            "host_minus_accounted": unattributed,
             "escrows": total,
         }
 

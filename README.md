@@ -458,23 +458,33 @@ Both are covered by `tests/integration/test_value_transfer.py`, which spends rea
 GEN and asserts the payee's chain-layer balance actually moves.
 
 > **A real limitation, and a correction.** GEN sent with a call that *reverts*
-> stays in the contract: verified, a payable call that rolled back left
-> `get_contract_balance()` at 1 GEN with no escrow behind it, and no method
-> attributes or returns it. Practical rule: **do not attach value to a call that
-> might revert.**
+> stays in the contract. Measured, not inferred: a `open_settlement` carrying
+> 1 GEN that rolled back with "notary is not on the trust list" left
+> `get_contract_balance()` up by exactly 1 GEN, and every route out —
+> `fund_settlement`, `settle`, `withdraw_fees` — was refused. A second failed
+> payable call added another, so the figure grows with every failure.
+>
+> Practical rule: **do not attach value to a call that can revert.**
 >
 > An earlier version of this note blamed the runner, claiming `__receive__` /
-> `__on_errored_message__` were unavailable. That was wrong, and the mistake is
-> worth recording. The SDK's `gl.Contract` base class *already defines*
-> `__on_errored_message__` as a public payable method whose body is `pass` —
-> "By default, it simply accepts the refunded value" — so every contract inherits
-> a refund handler for free. What failed was *redefining* it: GenVM rejects any
-> public method whose name starts with `__`. Inheriting and redefining are
-> different things, and the lint error only spoke about the second. `NotarizedSettlement`
-> inherits the default, so a failed *outbound* payout has its value returned to
-> the contract rather than burned; what cannot be recovered is value a *user*
-> sent on a transaction of their own that reverted, which no hook can route
-> because there is no escrow id to route it to.
+> `__on_errored_message__` were unavailable. That was wrong. The SDK's
+> `gl.Contract` base class *already defines* `__on_errored_message__` as a public
+> payable method whose body is `pass` — "by default, it simply accepts the
+> refunded value" — so every contract inherits a refund handler for free. What
+> failed was *redefining* it: GenVM rejects any public method whose name starts
+> with `__`. Inheriting and redefining are different things, and the lint error
+> only spoke about the second. What the inherited handler does is return the
+> value *to the contract*, which is not the same as returning it to the sender:
+> there is no escrow id attached to a bare transfer, so nothing can route it
+> out. `__receive__` is genuinely unavailable — declared abstract on the base
+> class, and not overridable for the same lint reason.
+>
+> `get_fund_conservation()` reports this rather than hiding it. `balanced` says
+> whether the contract's own books add up; `fully_accounted` and `unattributed`
+> say whether all the value it holds is accounted for. They can disagree, and
+> after a failed payable call they will — which is the point of separating them
+> instead of folding the gap into one reassuring boolean.
+
 
 
 ---
@@ -486,7 +496,7 @@ contracts/ai_notary.py                      12 methods  – attestation + consen
 contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
 tests/test_ai_notary.py                      84 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     88 direct-mode tests
+tests/test_settlement.py                     92 direct-mode tests
 tests/integration/.                          39 tests against real GenVM
 frontend/.                                   React dApp for both contracts
 deploy/deploy_ai_notary.py                   deploy entrypoint
@@ -528,7 +538,7 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **181** direct-mode tests
+Current status: `genvm-lint` clean on both contracts, **185** direct-mode tests
 passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
 The `gltest` integration suite runs against StudioNet: 19 of 22 pass, the
@@ -562,10 +572,10 @@ GenLayer StudioNet, used by the frontend and the seeded demo data:
 
 | Contract | Address | Purpose |
 |---|---|---|
-| `AINotary` | `0xE7D6830278B1CD7104e30Ec713c2eFCA73062733` | **demo** — curated records, what the frontend reads |
-| `NotarizedSettlement` | `0x88829c6EF95E0EeA85F4F0dDB9B92365FF872fCf` | **demo** — 25 methods |
-| `AINotary` | `0x61a5b5e9B8F3E226fa5969Cce5CDe4BDDdb27A67` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0xdF01F617bdDE3d0a5d3feD671e910Fe3Aa9c01d5` | **test** | |
+| `AINotary` | `0x4e6323f5736E843F6e0F3fB02e6e0799F6712A97` | **demo** — curated records, what the frontend reads |
+| `NotarizedSettlement` | `0x613bCd2777F4feC561FDbb3CD0725bbB52Ce293b` | **demo** — 25 methods |
+| `AINotary` | `0x58b63dECd39caC2a3845d4ceE6af4082509D26d5` | **test** — target of the full method sweep |
+| `NotarizedSettlement` | `0x9E00bF64d44B2A739b0B188b9D9C53D7EfaAAA10` | **test** | |
 
 Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint`
 exactly. The stale-verdict fix is proven against real GenVM by
@@ -874,7 +884,17 @@ Recorded because each one fails silently or misleadingly.
     real RPC — `gen_getContractSchemaForCode` — works fine; it is the client-side
     helper that cannot encode the string. Both contract files are ASCII-only.
 
-12. **A freshly deployed contract has no schema for a few seconds.** This cost a
+12. **`eth_getBalance` is not a reliable debit signal on StudioNet.** Worth
+    stating because it invalidates half of a conservation test. Sending 1 GEN
+    with a call that *reverted* left the sender's `eth_getBalance` unchanged at
+    `0` while the contract's balance rose by 1 GEN. The devnet is gasless and
+    mints for a value-bearing send, so the sender's balance does not go down the
+    way it would on a fee-charging network. Measuring "did the money leave" by
+    watching the sender's balance does not work here — measure the recipient's
+    balance instead, or count it in-contract.
+
+13. **A freshly deployed contract has no schema for a few seconds.** This cost a
+
     long detour, because the symptom points somewhere else. `gltest` deploys a
     contract and immediately asks for its schema; on StudioNet that request comes
     back `Contract <addr> has no schema` with code `-32001`. Every test in the

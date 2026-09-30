@@ -990,3 +990,66 @@ def test_accepting_without_a_nomination_is_refused(settlement, addrs, direct_vm)
     with pytest.raises(Exception) as exc:
         settlement.accept_ownership()
     assert "no pending nomination" in str(exc.value)
+
+
+# --- unattributed value is not the same as balanced books ------------------
+#
+# Measured on StudioNet rather than inferred: GEN attached to a payable call
+# that reverts lands in the contract and cannot leave. Two independent attempts
+# to route it out both failed, and a third landed another GEN on top, so the
+# figure grows with every failed payable call.
+#
+# That means `balanced` can be true while real value sits unaccounted for, and
+# that is the correct answer to the question it answers — it reports whether the
+# contract's own books add up. Folding the gap in would make it lie about the
+# books. The question people actually have is the other half, so it gets its own
+# field rather than being hidden behind a reassuring boolean.
+
+def test_a_clean_contract_is_balanced_and_fully_accounted(settlement):
+    report = conserved(settlement)
+    assert report["balanced"] is True
+    assert report["unattributed"] == 0
+    assert report["fully_accounted"] is True
+
+
+def test_funding_keeps_the_books_and_the_accounting_both_clean(
+    settlement, addrs, direct_vm, trusted
+):
+    eid = open_one(settlement, addrs)
+    fund(settlement, addrs, direct_vm, eid, AMOUNT)
+    report = conserved(settlement)
+    assert report["balanced"] is True
+    assert report["fully_accounted"] is True
+    assert report["unattributed"] == 0
+
+
+def test_a_refused_call_does_not_move_the_accounting(settlement, addrs, direct_vm, trusted):
+    """The invariant that matters when something is rejected: nothing shifted."""
+    eid = open_one(settlement, addrs)
+    fund(settlement, addrs, direct_vm, eid, AMOUNT)
+    before = conserved(settlement)
+
+    with pytest.raises(Exception):
+        fund(settlement, addrs, direct_vm, 999, AMOUNT)  # no such escrow
+
+    after = conserved(settlement)
+    assert after["total_received"] == before["total_received"]
+    assert after["outstanding"] == before["outstanding"]
+    assert after["unattributed"] == before["unattributed"]
+    assert after["balanced"] is True
+
+
+def test_balanced_and_fully_accounted_answer_different_questions(settlement):
+    """Documenting the distinction, because collapsing them would hide a real gap.
+
+    `get_fund_conservation` reports the observed StudioNet behaviour in its
+    docstring: a reverted payable call leaves GEN the contract cannot spend. So
+    the contract can hold value while `balanced` is true, and a reader who only
+    checks `balanced` will conclude nothing is wrong.
+    """
+    report = conserved(settlement)
+    assert set(("balanced", "fully_accounted", "unattributed")) <= set(report)
+    assert report["balanced"] == (
+        report["surplus"] == 0 and report["shortfall"] == 0
+    ), "balanced is a statement about the books only"
+    assert report["fully_accounted"] == (report["unattributed"] == 0)
