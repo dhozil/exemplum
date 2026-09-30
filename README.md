@@ -482,12 +482,12 @@ GEN and asserts the payee's chain-layer balance actually moves.
 ## Project layout
 
 ```
-contracts/ai_notary.py                       9 methods  – attestation + consensus
-contracts/notarized_settlement.py           22 methods  – escrow, trust list, settlement decision
-tests/test_ai_notary.py                      81 direct-mode cases
+contracts/ai_notary.py                      12 methods  – attestation + consensus
+contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
+tests/test_ai_notary.py                      84 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     81 direct-mode tests
-tests/integration/.                          39 tests against real GenVM (6 of them spend real GEN)
+tests/test_settlement.py                     88 direct-mode tests
+tests/integration/.                          39 tests against real GenVM
 frontend/.                                   React dApp for both contracts
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
@@ -528,14 +528,17 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **171** direct-mode tests
-passing, **all 31 on-chain methods** exercised live (9 notary + 22 settlement).
+Current status: `genvm-lint` clean on both contracts, **181** direct-mode tests
+passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
-The `gltest` integration suite is currently blocked on a `gltest` limitation
-rather than a contract defect — see the propagation note in
-[Platform gotchas](#platform-gottchas-hit-while-building). The two
-`prove_*.py` scripts cover the same stale-verdict and re-evaluation ground
-through `genlayer-py`, which can wait for a schema to appear.
+The `gltest` integration suite runs against StudioNet: 19 of 22 pass, the
+other three failing on Cloudflare returning HTML where JSON was expected. It
+could not run at all for most of this work, and the cause was not the one first
+recorded here — see the ASCII note in
+[Platform gotchas](#platform-gottchas-hit-while-building). The money path is
+covered by the `prove_*.py` scripts instead, because this `gltest` build cannot
+send value.
+
 
 > Integration tests read from the **npm registry**, not GitHub. GitHub's API
 > rate-limits the shared IP that GenLayer validator nodes run from and returns
@@ -559,12 +562,12 @@ GenLayer StudioNet, used by the frontend and the seeded demo data:
 
 | Contract | Address | Purpose |
 |---|---|---|
-| `AINotary` | `0x75388f3c1e3bb4935354F9509699f508FEcC79c5` | **demo** — curated records, what the frontend reads |
-| `NotarizedSettlement` | `0x3b14f30f76Bec3D83541527Ad9231DF1eAE70419` | **demo** — 22 methods |
-| `AINotary` | `0x2F2294347242191671605AA00Dda54cb68f8EEaF` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0xd72c90d587f9f728A1a33CBEEf7a703197BbB05A` | **test** |
+| `AINotary` | `0xE7D6830278B1CD7104e30Ec713c2eFCA73062733` | **demo** — curated records, what the frontend reads |
+| `NotarizedSettlement` | `0x88829c6EF95E0EeA85F4F0dDB9B92365FF872fCf` | **demo** — 25 methods |
+| `AINotary` | `0x61a5b5e9B8F3E226fa5969Cce5CDe4BDDdb27A67` | **test** — target of the full method sweep |
+| `NotarizedSettlement` | `0xdF01F617bdDE3d0a5d3feD671e910Fe3Aa9c01d5` | **test** | |
 
-Deployed and verified by schema — 9 and 22 methods, matching `genvm-lint`
+Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint`
 exactly. The stale-verdict fix is proven against real GenVM by
 `D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the money path by
 `probe_value_transfer.py` (real GEN, both directions of the payout).
@@ -862,7 +865,16 @@ Recorded because each one fails silently or misleadingly.
     plain empty list, like every other view. The general rule: **a view's return
      value is data, not storage — never hand back a storage allocator.**
 
-11. **A freshly deployed contract has no schema for a few seconds.** This cost a
+11. **Contract source must be ASCII.** `gltest` builds a schema with
+    `get_contract_schema_for_code`, which encodes the source as ASCII, so a single
+    em-dash in a comment makes every client fall over and the factory report
+    `Failed to get schema from all clients` for every test in the suite. The
+    symptom reads exactly like a malformed contract, and `genvm-lint` passes. It
+    cost most of this session's debugging budget before it was found, because the
+    real RPC — `gen_getContractSchemaForCode` — works fine; it is the client-side
+    helper that cannot encode the string. Both contract files are ASCII-only.
+
+12. **A freshly deployed contract has no schema for a few seconds.** This cost a
     long detour, because the symptom points somewhere else. `gltest` deploys a
     contract and immediately asks for its schema; on StudioNet that request comes
     back `Contract <addr> has no schema` with code `-32001`. Every test in the
@@ -938,3 +950,39 @@ call shows up — surfaced rather than papered over.
 The direct-mode suite covers the receive side; the payout side needs a real
 notarization and lives in `tests/integration/test_value_transfer.py`. A direct
 test named after the refund would have asserted nothing, so it is not there.
+
+### Ownership moves in two steps
+
+The owner key is unrecoverable, singular, and it is the only route to anything
+that can change: the notary trust list and `paused`. Lose it and the settlement
+layer cannot vet a notary, which means `open_settlement` can never succeed
+again. The layer is not degraded, it is stopped.
+
+So ownership is handed over with `nominate_owner` then `accept_ownership`. A
+one-step transfer would put that one typo away, irreversibly and silently. The
+nomination is replaceable, so a wrong address is corrected by nominating again
+rather than needing a recovery path, and only the nominee can accept — otherwise
+the current owner could hand the contract over while keeping control. Both
+contracts do this, because a paused notary that can never be unpaused is the
+same failure one layer down.
+
+### What the integration suite actually does
+
+`gltest tests/integration/ --network studionet` runs: **19 of 22 pass**, and the
+other three fail on Cloudflare returning HTML where JSON was expected, on the
+three tests that spend the longest on the node.
+
+It could not run at all until late in this work, and the reason was not the one
+recorded here earlier. `gltest` builds a schema with
+`get_contract_schema_for_code`, which encodes the contract source as ASCII — so
+**one em-dash in a comment** made every client fall over and the factory report
+"Failed to get schema from all clients" for every test in the suite. That reads
+exactly like a malformed contract. Both contract files are ASCII-only now, and
+`genvm-lint` is happy either way, so nothing else catches it.
+
+The money-path tests are marked skipped with the reason inline: this `gltest`
+build cannot send value, because `contract_function_factory` only threads
+`args` through to `write_contract_wrapper` even though `transact_method` accepts
+`value`. Six permanently red tests would teach people to ignore the suite, so
+they stay as a specification and the real coverage lives in
+`D:\Genlayer-project\wallet\probe_value_transfer.py` and `prove_refund_payout.py`.
