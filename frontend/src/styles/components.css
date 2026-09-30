@@ -1,0 +1,1762 @@
+/* --- certificate frame ---------------------------------------------------
+   A notarised record is an instrument, and an instrument has a border. The
+   double rule with mitred corners is borrowed from certificate stock rather
+   than invented here, and it is what makes a record detail page read as a
+   document rather than a form with a heading. */
+
+.certificate {
+  position: relative;
+  border: var(--rule);
+  background: var(--paper-2);
+  padding: var(--s-7) var(--s-6) var(--s-6);
+  border-radius: var(--radius);
+}
+
+/* The inner rule, offset from the outer, is the whole effect. */
+.certificate::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Corner ornaments: a short doubled rule in each corner, the way an engraved
+   certificate marks its extremities. Drawn rather than imaged so they stay
+   crisp at any zoom and cost nothing. */
+.certificate::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--brass), var(--brass)) left top / 22px 2px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) left top / 2px 22px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) right top / 22px 2px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) right top / 2px 22px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) left bottom / 22px 2px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) left bottom / 2px 22px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) right bottom / 22px 2px no-repeat,
+    linear-gradient(var(--brass), var(--brass)) right bottom / 2px 22px no-repeat;
+  opacity: 0.7;
+}
+
+.certificate__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--s-5);
+}
+
+/* The instrument's own heading, set in the display face with a rule under it —
+   a letterhead. */
+.certificate__title {
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding-bottom: var(--s-2);
+  border-bottom: 2px solid var(--ink);
+  display: inline-block;
+}
+
+.certificate__seal {
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Motion
+   ========================================================================== */
+
+/* The vocabulary is deliberately small, because motion is a voice, not a
+   feature list. Three things happen in this interface and nothing else:
+
+     rise      content settling into place, on load or on scroll
+     strike    the seal being pressed (see above)
+     ink       a border or fill spreading from a state change
+
+   Anything that is not one of those is decoration, and decoration is what
+   makes a page feel like a template. */
+
+/* --- load and scroll reveal ---------------------------------------------- */
+
+@keyframes rise {
+  from {
+    transform: translate3d(0, 12px, 0);
+    opacity: 0;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+.rise {
+  animation: rise var(--dur-slow) var(--ease-stamp) both;
+}
+
+/* The hero is staged rather than revealed: eyebrow, then claim, then the
+   supporting line, then the actions, then the seal. Reading order is arrival
+   order, so the page introduces itself the way it would be read. */
+.rise--1 { animation-delay: 40ms; }
+.rise--2 { animation-delay: 120ms; }
+.rise--3 { animation-delay: 200ms; }
+.rise--4 { animation-delay: 280ms; }
+.rise--5 { animation-delay: 380ms; }
+
+/* Below the fold, elements wait for the reader instead of animating on load
+   while off screen, where nobody would see it. */
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 14px, 0);
+  transition:
+    opacity var(--dur-slow) var(--ease-stamp),
+    transform var(--dur-slow) var(--ease-stamp);
+  will-change: opacity, transform;
+}
+
+.reveal.is-shown {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  will-change: auto;
+}
+
+/* Stagger children of a revealed group, so a row of cards arrives as a row. */
+.reveal-group > * {
+  transition-delay: 0ms;
+}
+
+.reveal-group.is-shown > *:nth-child(1) { transition-delay: 0ms; }
+.reveal-group.is-shown > *:nth-child(2) { transition-delay: 70ms; }
+.reveal-group.is-shown > *:nth-child(3) { transition-delay: 140ms; }
+.reveal-group.is-shown > *:nth-child(4) { transition-delay: 210ms; }
+
+/* --- ink ---------------------------------------------------------------- */
+
+/* A state change that spreads rather than jumps. Used by the capability card
+   rules, where the accent line draws itself in as the card arrives. */
+@keyframes ink-spread {
+  from {
+    transform: scaleX(0);
+    opacity: 0.4;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* --- hover and press ---------------------------------------------------- */
+
+/* Buttons press in slightly. A real control has travel. */
+.btn,
+.copybtn,
+.masthead__link {
+  transition:
+    background var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-inout);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+/* The nav underline slides between items rather than blinking on and off. */
+.masthead__link span {
+  position: relative;
+}
+
+.masthead__link span::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.55rem;
+  height: 2px;
+  background: var(--brass);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur) var(--ease-stamp);
+}
+
+.masthead__link:hover span::after,
+.masthead__link[aria-current="page"] span::after {
+  transform: scaleX(1);
+}
+
+/* The mark answers a pointer. Small, and only on devices with one. It tilts
+   rather than scales, because a mark that is meant to read as *struck* should
+   shift like something pressed, not grow like a button. */
+@media (hover: hover) {
+  .masthead__mark .mark {
+    transform: rotate(-4deg);
+    transition: transform var(--dur) var(--ease-stamp);
+  }
+
+  .masthead__mark:hover .mark {
+    transform: rotate(2.5deg) scale(1.06);
+  }
+}
+
+/* A list row acknowledges the pointer before it navigates. */
+.row__link {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+
+@media (hover: hover) {
+  .row__link:hover {
+    background: var(--paper-2);
+  }
+}
+
+/* Cards lift by a hair — enough to feel physical, not enough to look like a
+   material-design ripple. */
+.card,
+.stat,
+.step,
+.empty {
+  transition:
+    background var(--dur-fast) var(--ease-inout),
+    box-shadow var(--dur) var(--ease-inout),
+    transform var(--dur) var(--ease-inout);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: 0 2px 10px rgba(18, 36, 43, 0.07);
+  }
+
+  .stat:hover {
+    background: var(--paper-3);
+  }
+}
+
+/* ==========================================================================
+   Components
+   ========================================================================== */
+
+/* --- header ------------------------------------------------------------- */
+
+.masthead {
+  border-bottom: var(--rule);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.masthead__inner {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: var(--s-3) var(--s-5);
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+}
+
+@media (min-width: 900px) {
+  .masthead__inner {
+    padding: var(--s-3) var(--s-6);
+  }
+}
+
+.masthead__mark {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+/* The wordmark. Letterspaced capitals rather than sentence case: the interface
+   speaks in tracked uppercase docket labels everywhere else, and a wordmark set
+   that way reads as an institution rather than as a product label. Set smaller
+   than the previous sentence-case version because capitals are optically
+   larger — matching cap-height to the mark matters more than matching the
+   nominal size. */
+.masthead__wordmark {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.masthead__nav {
+  display: flex;
+  gap: var(--s-1);
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.masthead__nav::-webkit-scrollbar {
+  display: none;
+}
+
+.masthead__link {
+  font-size: var(--t-small);
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: var(--s-2) var(--s-3);
+  white-space: nowrap;
+}
+
+.masthead__link:hover {
+  color: var(--ink);
+}
+
+/* The active marker lives on the inner span, which is what NavLink's render prop
+   marks, so the rule targets the span and its ::after. Animating scaleX rather
+   than toggling a border means the underline travels. */
+.masthead__link[aria-current='page'],
+.masthead__link span[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* On a narrow screen the wordmark, the nav and the account control cannot share
+   one row without the nav being squeezed. The account control drops to its own
+   row and the nav is given the full width to scroll in. */
+@media (max-width: 760px) {
+  .masthead__inner {
+    flex-wrap: wrap;
+    row-gap: var(--s-2);
+  }
+
+  .masthead__nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    padding-bottom: 2px;
+  }
+
+  .masthead__nav + .masthead__nav,
+  .masthead__inner > .cluster {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .masthead__link {
+    padding: var(--s-1) var(--s-2);
+  }
+}
+
+/* --- network strip ------------------------------------------------------ */
+
+.netstrip {
+  background: var(--ink);
+  color: var(--ink-on-dark-soft);
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+}
+
+.netstrip__inner {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: var(--s-2) var(--s-5);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+
+@media (min-width: 900px) {
+  .netstrip__inner {
+    padding: var(--s-2) var(--s-6);
+  }
+}
+
+.netstrip__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.netstrip a {
+  color: var(--ink-on-dark-soft);
+}
+
+.netstrip a:hover {
+  color: var(--ink-on-dark);
+}
+
+.pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--verdigris);
+  flex-shrink: 0;
+}
+
+.pulse--down {
+  background: var(--oxblood);
+}
+
+.pulse--checking {
+  background: var(--brass);
+}
+
+/* --- two-column heads ----------------------------------------------------
+   The seal belongs beside the thing it attests, not under it. This was
+   originally a pair of blocks that read as a layout fault, and the hero has
+   since grown its own grid; what remains is the settlement detail head, which
+   still uses it. */
+
+.detail-head {
+  display: grid;
+  gap: var(--s-6);
+  align-items: center;
+}
+
+@media (min-width: 900px) {
+  .detail-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s-7);
+    align-items: start;
+  }
+}
+
+/* --- hero ----------------------------------------------------------------
+   The old hero was a 1.35fr/1fr grid inside a 1180px container with the
+   headline capped at 18ch, so the type scale could never open up and the right
+   column was narrower than the seal it had to hold. This is a real two-column
+   composition: the text takes the space it needs, the seal gets a fixed stage,
+   and the type is allowed to be large. */
+
+.hero {
+  display: grid;
+  gap: var(--s-7);
+  padding: var(--s-8) 0 var(--s-7);
+  align-items: center;
+}
+
+@media (min-width: 1000px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr) 26rem;
+    gap: var(--s-8);
+    padding: var(--s-9) 0 var(--s-8);
+  }
+}
+
+.hero__text h1 {
+  font-size: var(--t-hero);
+  margin: var(--s-4) 0 var(--s-5);
+  max-width: 15ch;
+  text-wrap: balance;
+}
+
+.hero__text .lede {
+  max-width: 58ch;
+}
+
+/* The seal sits on a stage rather than floating, so the guilloche has
+   something to be engraved into. Flat, not a radial highlight: a bright centre
+   under a rosette reads as a glow behind the seal rather than as paper. */
+.hero__seal {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: var(--s-4);
+  text-align: center;
+  padding: var(--s-6) var(--s-5) var(--s-5);
+  border: var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.hero__seal figcaption {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-1);
+  font-size: var(--t-small);
+  max-width: 34ch;
+  line-height: 1.5;
+}
+
+.hero__seal-line {
+  color: var(--ink-soft);
+}
+
+/* --- capability cards ----------------------------------------------------
+   These were a 2px top border and some text. They now read as docket cards:
+   numbered by what they do, with the brass rule as the accent. Numbering is
+   meaningful here — these are the three things the contract can do, in order
+   of the pipeline. */
+
+.caps {
+  display: grid;
+  gap: var(--s-5);
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+}
+
+.cap {
+  border: var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  padding: var(--s-5);
+  position: relative;
+  overflow: hidden;
+}
+
+/* The accent rule draws itself in when the card arrives. */
+.cap::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--brass);
+  transform-origin: left center;
+}
+
+.cap--in::before {
+  animation: ink-spread var(--dur-slow) var(--ease-stamp) both;
+}
+
+.cap__num {
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  letter-spacing: var(--track-label);
+  color: var(--brass);
+  margin-bottom: var(--s-3);
+}
+
+.cap h3 {
+  font-size: var(--t-h3);
+  margin-bottom: var(--s-2);
+}
+
+.cap p {
+  color: var(--ink-soft);
+  font-size: var(--t-small);
+  margin: 0;
+}
+
+/* --- seal (signature element) ------------------------------------------ */
+
+/* The rosette sits behind the impression and is masked by nothing: it has to
+   read as engine-turning under the stamp, so it is larger, lighter, and turns
+   to the verdict colour. */
+.sealwrap {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  /* The rosette is larger than the seal and must not be clipped to the seal's
+     box, so the wrapper is padded out to the rosette's footprint and centred
+     on the impression. Padding rather than a negative margin keeps the layout
+     honest: the element really is that big. */
+  padding: 21%;
+}
+
+/* The rosette sits behind the impression and is masked by nothing: it has to
+   read as engine-turning under the stamp, so it is larger, lighter, and turns
+   to the verdict colour. */
+.sealwrap__guilloche {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 0;
+  overflow: visible;
+  transition: opacity var(--dur-slow) var(--ease-inout);
+}
+
+.sealwrap__guilloche .guilloche {
+  display: block;
+}
+
+.sealwrap__guilloche.seal--confirmed .guilloche {
+  stroke: var(--verdigris);
+}
+
+.sealwrap__guilloche.seal--refuted .guilloche {
+  stroke: var(--oxblood);
+}
+
+.sealwrap__guilloche.seal--inconclusive .guilloche {
+  stroke: var(--slate);
+}
+
+/* The impression. `will-change` is declared but not `translate`/`scale` alone,
+   because the strike animates transform and the compositor needs to know. */
+.sealwrap__impression {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  z-index: 1;
+  will-change: transform;
+}
+
+/* A struck seal is pressed into the sheet, so it carries a tight contact shadow.
+   Deliberately a single dark shadow: the usual "bright edge above, dark below"
+   emboss trick needs a white glow offset upward, and a white drop-shadow on
+   hollow artwork renders *inside* the hole — the seal came out with a bright
+   disc floating in its middle. One contact shadow is what actually reads. */
+.seal--struck {
+  filter: drop-shadow(0 1px 1px rgba(18, 36, 43, 0.14)) drop-shadow(0 3px 5px rgba(18, 36, 43, 0.16));
+}
+
+.seal--idle,
+.seal--pending {
+  filter: none;
+}
+
+/* --- the strike ---------------------------------------------------------
+   The one loud animation in the interface. It descends, lands hard, rebounds
+   once, and settles. Keyed off the component so it plays once per record. */
+
+@keyframes seal-strike {
+  0% {
+    transform: translate3d(0, -16px, 0) rotate(-8deg) scale(1.08);
+    opacity: 0;
+  }
+  38% {
+    opacity: 1;
+  }
+  62% {
+    transform: translate3d(0, 3px, 0) rotate(1.6deg) scale(0.982);
+  }
+  80% {
+    transform: translate3d(0, -1.5px, 0) rotate(-0.5deg) scale(1.007);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes seal-bloom {
+  0% {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  58% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.16);
+    opacity: 0;
+  }
+}
+
+.sealwrap__impression > .seal--struck {
+  animation: seal-strike var(--dur-stamp) var(--ease-stamp) both;
+}
+
+/* Ink spreads past the edge of the stamp on impact, once, and fades. It is a
+   ring rather than a glow so it reads as pigment rather than light.
+
+   `opacity: 0` is the resting state, not an afterthought: the bloom is drawn by
+   an animation, and if that animation never runs — motion disabled, an older
+   engine, a browser that dropped the keyframes — a base state of `opacity: 1`
+   leaves a permanent coloured ring sitting around the seal. Hiding it by
+   default means the failure mode is an absent flourish rather than a broken
+   mark. */
+.sealwrap__bloom {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  color: var(--ink);
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  animation: seal-bloom var(--dur-stamp) var(--ease-out) both;
+}
+
+.seal--confirmed ~ .sealwrap__bloom,
+.sealwrap__impression:has(.seal--confirmed) .sealwrap__bloom {
+  color: var(--verdigris);
+}
+
+.sealwrap__impression:has(.seal--refuted) .sealwrap__bloom {
+  color: var(--oxblood);
+}
+
+.sealwrap__impression:has(.seal--inconclusive) .sealwrap__bloom {
+  color: var(--slate);
+}
+
+/* --- inconclusive: examined, not settled --------------------------------
+   The one verdict that means the committee could not agree is the only seal
+   that keeps moving. A confirmed or refuted seal is struck once and stops,
+   because a decision does not keep reconsidering itself.
+
+   Two layers, both the same gesture: light passing over the face, the way a
+   stamp is checked under raking light. The travelling arc is the readable part —
+   an unmistakable comet running the empty band between the inner ring and the
+   ticks. The sheen is the modern part, and stays quiet enough that the arc is
+   what you notice first. */
+
+@keyframes seal-scan {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.seal__scan {
+  transform-origin: 100px 100px;
+  animation: seal-scan 4.2s linear infinite;
+}
+
+.seal__scan circle {
+  fill: none;
+  stroke: var(--slate);
+  stroke-linecap: round;
+}
+
+/* 2πr at r=72 is 452.4. The head is a short bright dash and the tail a long
+   faint one, offset so the tail trails just behind the head rather than
+   overlapping it. */
+.seal__scan-head {
+  stroke-width: 4.5;
+  stroke-dasharray: 42 410.4;
+  opacity: 1;
+}
+
+.seal__scan-tail {
+  stroke-width: 3.5;
+  stroke-dasharray: 150 302.4;
+  stroke-dashoffset: 162;
+  opacity: 0.38;
+}
+
+/* Masked to the outer band so the light sweeps the rim and the engraving
+   without ever touching the verdict, which must stay the most legible thing in
+   the seal. `soft-light` rather than `screen` so a pale paper does not blow
+   out. */
+.sealwrap__sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0.85) 26deg,
+    rgba(255, 255, 255, 0) 64deg,
+    rgba(255, 255, 255, 0) 360deg
+  );
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 44%, #000 68% 100%);
+  mask: radial-gradient(circle at 50% 50%, transparent 0 44%, #000 68% 100%);
+  mix-blend-mode: soft-light;
+  animation: seal-scan 4.2s linear infinite;
+}
+
+/* An inconclusive seal is not struck as hard. The press is lighter and the
+   settle is quicker, so it lands like an impression that has not quite set —
+   which is precisely what "no decision" should look like. */
+.sealwrap__impression > .seal--struck.seal--inconclusive {
+  animation-name: seal-press;
+  animation-duration: calc(var(--dur-stamp) * 0.78);
+}
+
+@keyframes seal-press {
+  0% {
+    transform: translate3d(0, -11px, 0) rotate(-5deg) scale(1.045);
+    opacity: 0;
+  }
+  46% {
+    opacity: 1;
+  }
+  70% {
+    transform: translate3d(0, 2px, 0) rotate(1deg) scale(0.99);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+/* The note under an inconclusive seal carries a reason, so it is set as a
+   sentence rather than a docket label, and given a little more presence than
+   the state captions. Written as a two-class selector because the base
+   `.seal__caption` is declared later in this section and would otherwise win on
+   source order and force the sentence back to uppercase. */
+.seal__caption.seal__caption--note {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: var(--t-small);
+  line-height: 1.45;
+  color: var(--slate);
+  max-width: 24ch;
+  margin-inline: auto;
+  margin-top: var(--s-4);
+}
+
+/* Reduced motion: the sweep is decoration layered on top of a verdict the
+   banner already states, so it is removed outright rather than frozen at some
+   arbitrary rotation. The caption still explains the verdict.
+
+   `animation: none` is set as well as `display: none`. Hiding the element is
+   enough to stop it painting, but the global reduced-motion block in tokens.css
+   clamps durations to 0.001ms rather than clearing them, so an infinite
+   animation would still be *running* at that duration. Saying it plainly costs
+   nothing and leaves no ambiguity about whether the sweep is active. */
+@media (prefers-reduced-motion: reduce) {
+  .seal__scan,
+  .sealwrap__sheen {
+    display: none;
+    animation: none;
+  }
+
+  .sealwrap__impression > .seal--struck.seal--inconclusive {
+    animation: none;
+  }
+}
+
+.seal {
+  display: block;
+  flex-shrink: 0;
+}
+
+.seal__ring-outer {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.seal__ring-inner {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 0.75;
+  opacity: 0.5;
+}
+
+.seal__ticks line {
+  stroke: var(--ink);
+  stroke-width: 0.75;
+  opacity: 0.45;
+}
+
+.seal__idle {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+  opacity: 0.7;
+}
+
+.seal__progress {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 3;
+  stroke-linecap: butt;
+  transform: rotate(-90deg);
+  transform-origin: 100px 100px;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.seal__progress--done {
+  stroke: var(--verdigris);
+}
+
+.seal__hash {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  fill: var(--ink-soft);
+  text-anchor: middle;
+}
+
+.seal__verdict {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-anchor: middle;
+  fill: var(--ink);
+}
+
+.seal__banner {
+  fill: var(--ink);
+}
+
+.seal__banner-text {
+  fill: var(--paper);
+}
+
+.seal--struck .seal__ring-outer {
+  stroke-width: 2.5;
+}
+
+.seal--struck.seal--confirmed .seal__ring-outer,
+.seal--struck.seal--refuted .seal__ring-outer {
+  stroke-width: 3;
+}
+
+.seal--confirmed .seal__ring-outer {
+  stroke: var(--verdigris);
+}
+
+.seal--refuted .seal__ring-outer {
+  stroke: var(--oxblood);
+}
+
+.seal--inconclusive .seal__ring-outer {
+  stroke: var(--slate);
+}
+
+.seal--struck .seal__ring-inner,
+.seal--struck .seal__ticks line {
+  stroke: currentColor;
+}
+
+.seal__caption {
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: center;
+  margin-top: var(--s-3);
+  /* The wrapper is `line-height: 0` so the inline-grid packs the svg without a
+     stray text baseline. A caption inheriting that renders its own glyphs on top
+     of each other, so it has to be set back explicitly. */
+  line-height: 1.5;
+}
+
+/* --- badges ------------------------------------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.badge--confirmed {
+  color: var(--verdigris);
+  border-color: var(--verdigris);
+  background: var(--verdigris-wash);
+}
+
+.badge--refuted {
+  color: var(--oxblood);
+  border-color: var(--oxblood);
+  background: var(--oxblood-wash);
+}
+
+.badge--inconclusive {
+  color: var(--slate);
+  border-color: var(--slate);
+  background: var(--slate-wash);
+}
+
+.badge--unknown {
+  color: var(--ink-faint);
+  border-color: var(--paper-edge);
+}
+
+.badge--brass {
+  color: var(--brass);
+  border-color: var(--brass);
+  background: var(--brass-wash);
+}
+
+.badge--solid {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+/* Confidence is shown as ticks, not a number: it is an ordinal, and a bar
+   would imply a precision the contract does not have. */
+.meter {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.meter__tick {
+  width: 14px;
+  height: 4px;
+  background: var(--paper-3);
+}
+
+.meter__tick--on {
+  background: currentColor;
+}
+
+/* --- cards -------------------------------------------------------------- */
+
+.card {
+  border: var(--rule);
+  background: var(--paper-2);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+}
+
+.card--flat {
+  background: transparent;
+}
+
+.card--ink {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--ink-on-dark);
+}
+
+.card--ink h1,
+.card--ink h2,
+.card--ink h3 {
+  color: var(--ink-on-dark);
+}
+
+.card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+/* --- key/value grid ----------------------------------------------------- */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, auto) 1fr;
+  gap: var(--s-3) var(--s-4);
+  align-items: baseline;
+}
+
+.kv > dt {
+  margin: 0;
+}
+
+.kv > dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+
+@media (max-width: 560px) {
+  .kv {
+    grid-template-columns: 1fr;
+    gap: var(--s-1) 0;
+  }
+
+  .kv > dd {
+    margin-bottom: var(--s-3);
+  }
+}
+
+/* --- forms -------------------------------------------------------------- */
+
+.field {
+  display: block;
+  margin-bottom: var(--s-5);
+}
+
+.field__label {
+  display: block;
+  margin-bottom: var(--s-2);
+  font-weight: 500;
+}
+
+.field__hint {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-small);
+  color: var(--ink-faint);
+}
+
+.field__error {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-small);
+  color: var(--oxblood);
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  background: var(--paper);
+  border: var(--rule-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.12s ease;
+}
+
+.input:hover,
+.textarea:hover {
+  border-color: var(--ink-faint);
+}
+
+.input:focus,
+.textarea:focus {
+  border-color: var(--brass);
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--brass);
+}
+
+.input[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--oxblood);
+}
+
+.textarea {
+  min-height: 6.5rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.input--mono,
+.textarea--mono {
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+/* --- buttons ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--t-small);
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--ink-2);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--paper-2);
+  border-color: var(--ink-faint);
+}
+
+.btn--brass {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #fbf7ec;
+}
+
+.btn--brass:hover:not(:disabled) {
+  background: var(--brass-bright);
+  border-color: var(--brass-bright);
+}
+
+.btn--sm {
+  padding: 0.35rem 0.6rem;
+  font-size: var(--t-micro);
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* --- tx status ---------------------------------------------------------- */
+
+.txstatus {
+  border: var(--rule);
+  border-left: 3px solid var(--ink-faint);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  background: var(--paper-2);
+  display: grid;
+  gap: var(--s-2);
+}
+
+.txstatus[data-tone="progress"] {
+  border-left-color: var(--brass);
+  background: var(--brass-wash);
+}
+
+.txstatus[data-tone="success"] {
+  border-left-color: var(--verdigris);
+  background: var(--verdigris-wash);
+}
+
+.txstatus[data-tone="warn"] {
+  border-left-color: var(--slate);
+  background: var(--slate-wash);
+}
+
+.txstatus[data-tone="danger"] {
+  border-left-color: var(--oxblood);
+  background: var(--oxblood-wash);
+}
+
+.txstatus__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.txstatus__body {
+  font-size: var(--t-small);
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.txstatus__body strong {
+  color: var(--ink);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--brass);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- notices ------------------------------------------------------------ */
+
+.notice {
+  border: var(--rule);
+  border-left: 3px solid var(--ink-faint);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  background: var(--paper-2);
+}
+
+.notice__title {
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-bottom: var(--s-2);
+}
+
+.notice__body {
+  font-size: var(--t-small);
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.notice__body + .notice__body {
+  margin-top: var(--s-2);
+}
+
+.notice__code {
+  display: block;
+  margin-top: var(--s-2);
+  padding: var(--s-2);
+  background: var(--paper);
+  border: var(--rule-faint);
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--ink-soft);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notice--danger {
+  border-left-color: var(--oxblood);
+  background: var(--oxblood-wash);
+}
+
+.notice--warn {
+  border-left-color: var(--brass);
+  background: var(--brass-wash);
+}
+
+.notice--info {
+  border-left-color: var(--ink-faint);
+}
+
+.notice--ink {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--ink-on-dark);
+}
+
+.notice--ink .notice__title {
+  color: var(--ink-on-dark);
+}
+
+.notice--ink .notice__body {
+  color: var(--ink-on-dark-soft);
+}
+
+.notice--ink a {
+  color: var(--brass-bright);
+}
+
+/* --- empty / loading ---------------------------------------------------- */
+
+.empty {
+  border: var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s-7) var(--s-5);
+  text-align: center;
+  background: var(--paper-2);
+}
+
+.empty__title {
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  margin-bottom: var(--s-2);
+}
+
+.empty__body {
+  color: var(--ink-soft);
+  max-width: 46ch;
+  margin: 0 auto var(--s-4);
+  font-size: var(--t-small);
+}
+
+.skel {
+  background: linear-gradient(90deg, var(--paper-2) 25%, var(--paper-3) 37%, var(--paper-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 2px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+.skel--line {
+  height: 12px;
+  margin-bottom: var(--s-2);
+}
+
+.skel--block {
+  height: 92px;
+}
+
+/* --- record rows -------------------------------------------------------- */
+
+.row {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4) 0;
+  border-top: var(--rule-faint);
+  align-items: start;
+}
+
+.row:first-child {
+  border-top: none;
+}
+
+@media (min-width: 760px) {
+  .row {
+    grid-template-columns: 4.5rem 1fr auto;
+    gap: var(--s-4);
+    align-items: center;
+  }
+}
+
+.row__claim {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+  font-size: var(--t-micro);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+}
+
+/* The whole row is the link, so it stays a grid: `display: block` here would
+   win on source order and collapse the #id / claim / badges columns into a
+   stack, which is what it used to do. */
+.row__link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.row__link:hover .row__claim {
+  text-decoration: underline;
+  text-decoration-color: var(--brass);
+  text-underline-offset: 3px;
+}
+
+.row--interactive {
+  cursor: pointer;
+}
+
+.row--interactive:hover {
+  background: var(--paper-2);
+}
+
+/* --- source list -------------------------------------------------------- */
+
+.srclist {
+  display: grid;
+  gap: 0;
+  border: var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.srclist__item {
+  padding: var(--s-3) var(--s-4);
+  border-top: var(--rule-faint);
+  display: grid;
+  gap: var(--s-2);
+}
+
+.srclist__item:first-child {
+  border-top: none;
+}
+
+.srclist__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.srclist__url {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--ink);
+  word-break: break-all;
+  text-decoration-color: var(--paper-edge);
+}
+
+.quote {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid var(--brass);
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quote--empty {
+  border-left-color: var(--paper-edge);
+  font-style: italic;
+  color: var(--ink-faint);
+}
+
+/* --- source input rows (notarize form) ---------------------------------- */
+
+.srcentry {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: var(--rule-faint);
+  background: var(--paper-2);
+  border-radius: var(--radius);
+}
+
+.srcentry__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+/* --- stats -------------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  border: var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.stat {
+  padding: var(--s-4);
+  border-left: var(--rule-faint);
+  background: var(--paper-2);
+}
+
+.stat:first-child {
+  border-left: none;
+}
+
+.stat__value {
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__label {
+  margin-top: var(--s-2);
+}
+
+/* --- steps (how it works) ----------------------------------------------- */
+/* Numbering here is real: the attestation pipeline IS an ordered sequence,
+   and the ordinal tells you which stage you are at. */
+
+.steps {
+  display: grid;
+  gap: 0;
+  counter-reset: step;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: var(--s-4);
+  padding: var(--s-5) 0;
+  border-top: var(--rule-faint);
+  align-items: start;
+}
+
+.step:first-child {
+  border-top: none;
+}
+
+.step__num {
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  letter-spacing: var(--track-label);
+  color: var(--brass);
+  padding-top: 0.35rem;
+}
+
+.step__title {
+  font-size: var(--t-h3);
+  margin-bottom: var(--s-2);
+}
+
+.step__body {
+  color: var(--ink-soft);
+  max-width: 62ch;
+  margin: 0;
+}
+
+/* --- tables ------------------------------------------------------------- */
+
+.tablewrap {
+  overflow-x: auto;
+  border: var(--rule);
+  border-radius: var(--radius);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-small);
+  min-width: 34rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--s-3) var(--s-4);
+  border-top: var(--rule-faint);
+  vertical-align: top;
+}
+
+.table thead th {
+  border-top: none;
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.table tbody tr:first-child td {
+  border-top: var(--rule-faint);
+}
+
+/* --- footer ------------------------------------------------------------- */
+
+.footer {
+  border-top: var(--rule);
+  margin-top: var(--s-8);
+  background: var(--ink);
+  color: var(--ink-on-dark-soft);
+}
+
+.footer__inner {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-5);
+  display: grid;
+  gap: var(--s-5);
+}
+
+@media (min-width: 760px) {
+  .footer__inner {
+    grid-template-columns: 1.4fr 1fr 1fr;
+    padding: var(--s-6);
+  }
+}
+
+/* The footer title carries the mark, so it is a flex row rather than a heading
+   with an icon floated beside it. */
+.footer__title {
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-on-dark);
+  margin-bottom: var(--s-3);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.footer a {
+  color: var(--ink-on-dark-soft);
+  text-decoration: none;
+  display: block;
+  padding: var(--s-1) 0;
+  font-size: var(--t-small);
+}
+
+.footer a:hover {
+  color: var(--brass-bright);
+}
+
+.footer__note {
+  font-size: var(--t-micro);
+  color: var(--ink-faint);
+  max-width: 42ch;
+  line-height: 1.55;
+}
+
+/* --- toast -------------------------------------------------------------- */
+
+.toasts {
+  position: fixed;
+  right: var(--s-4);
+  bottom: var(--s-4);
+  z-index: 60;
+  display: grid;
+  gap: var(--s-2);
+  width: min(24rem, calc(100vw - var(--s-4) * 2));
+}
+
+.toast {
+  border: var(--rule-strong);
+  border-left: 3px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  padding: var(--s-3) var(--s-4);
+  box-shadow: 0 4px 16px rgba(18, 36, 43, 0.16);
+  display: grid;
+  gap: var(--s-1);
+}
+
+.toast[data-tone="success"] {
+  border-left-color: var(--verdigris);
+}
+
+.toast[data-tone="danger"] {
+  border-left-color: var(--oxblood);
+}
+
+.toast[data-tone="warn"] {
+  border-left-color: var(--brass);
+}
+
+.toast__title {
+  font-weight: 600;
+  font-size: var(--t-small);
+}
+
+.toast__body {
+  font-size: var(--t-micro);
+  color: var(--ink-soft);
+}
+
+/* --- inline link with a copy affordance --------------------------------- */
+
+.copyable {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.copybtn {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: var(--t-micro);
+  font-family: var(--font-mono);
+  line-height: 1;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.copybtn:hover {
+  color: var(--ink);
+  background: var(--paper-2);
+}

@@ -1,0 +1,840 @@
+INFO: File `gltest.config.yaml` found in the current directory, using it
+INFO: Clearing artifacts directory: artifacts
+INFO: Using the following configuration:
+INFO:   RPC URL: https://studio.genlayer.com/api
+INFO:   Selected Network: studionet
+INFO:   Available networks: ['localnet', 'studionet', 'testnet_asimov', 'testnet_bradbury']
+INFO:   Selected chain type: studionet
+INFO:   Available chains: localnet, studionet, testnet_asimov, testnet_bradbury
+INFO:   Contracts directory: contracts
+INFO:   Artifacts directory: artifacts
+INFO:   Environment: .env
+INFO:   Default wait interval: 3000 ms
+INFO:   Default wait retries: 50
+INFO:   Leader only mode: False
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\dhozi\AppData\Local\Programs\Python\Python312\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Genlayer-project\ai-notary
+configfile: pytest.ini
+plugins: anyio-4.14.2, genlayer-test-0.29.2, forked-1.6.0
+collecting ... collected 22 items
+
+tests/integration/test_settlement_integration.py::test_notary_is_on_the_trust_list ERROR
+tests/integration/test_settlement_integration.py::test_untrusted_notary_cannot_be_used ERROR
+tests/integration/test_settlement_integration.py::test_revoked_notary_cannot_open_a_settlement ERROR
+tests/integration/test_settlement_integration.py::test_open_requires_two_sources ERROR
+tests/integration/test_settlement_integration.py::test_open_rejects_empty_spec ERROR
+tests/integration/test_settlement_integration.py::test_open_rejects_duplicate_only_sources ERROR
+tests/integration/test_settlement_integration.py::test_open_accepts_repeated_urls_above_the_minimum ERROR
+tests/integration/test_settlement_integration.py::test_settle_requires_attestation ERROR
+tests/integration/test_settlement_integration.py::test_challenge_requires_a_notarization ERROR
+tests/integration/test_settlement_integration.py::test_confirmed_notarization_pays_the_worker ERROR
+tests/integration/test_settlement_integration.py::test_notarization_for_another_claim_cannot_be_attached ERROR
+tests/integration/test_settlement_integration.py::test_refuted_notarization_refunds_the_payer ERROR
+tests/integration/test_settlement_integration.py::test_challenge_and_reevaluation_reach_the_notary ERROR
+tests/integration/test_settlement_integration.py::test_outcome_table_is_exposed ERROR
+tests/integration/test_settlement_integration.py::test_missing_ids_read_as_empty_rather_than_erroring ERROR
+tests/integration/test_settlement_integration.py::test_stats_track_commitments_and_outcomes ERROR
+tests/integration/test_settlement_integration.py::test_contract_balance_is_zero_on_studionet ERROR
+tests/integration/test_settlement_integration.py::test_a_bound_escrow_pays_the_worker ERROR
+tests/integration/test_settlement_integration.py::test_refresh_picks_up_a_verdict_the_notary_moved ERROR
+tests/integration/test_settlement_integration.py::test_settle_reads_the_current_verdict_even_without_a_refresh ERROR
+tests/integration/test_settlement_integration.py::test_a_settled_escrow_cannot_be_refreshed ERROR
+tests/integration/test_settlement_integration.py::test_revoking_the_notary_blocks_settlement_not_just_attachment ERROR
+
+=================================== ERRORS ====================================
+_____________ ERROR at setup of test_notary_is_on_the_trust_list ______________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+___________ ERROR at setup of test_untrusted_notary_cannot_be_used ____________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_______ ERROR at setup of test_revoked_notary_cannot_open_a_settlement ________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+______________ ERROR at setup of test_open_requires_two_sources _______________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_______________ ERROR at setup of test_open_rejects_empty_spec ________________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_________ ERROR at setup of test_open_rejects_duplicate_only_sources __________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_____ ERROR at setup of test_open_accepts_repeated_urls_above_the_minimum _____
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_____________ ERROR at setup of test_settle_requires_attestation ______________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+__________ ERROR at setup of test_challenge_requires_a_notarization ___________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+________ ERROR at setup of test_confirmed_notarization_pays_the_worker ________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+__ ERROR at setup of test_notarization_for_another_claim_cannot_be_attached ___
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+________ ERROR at setup of test_refuted_notarization_refunds_the_payer ________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_____ ERROR at setup of test_challenge_and_reevaluation_reach_the_notary ______
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_______________ ERROR at setup of test_outcome_table_is_exposed _______________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+____ ERROR at setup of test_missing_ids_read_as_empty_rather_than_erroring ____
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_________ ERROR at setup of test_stats_track_commitments_and_outcomes _________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+________ ERROR at setup of test_contract_balance_is_zero_on_studionet _________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+____________ ERROR at setup of test_a_bound_escrow_pays_the_worker ____________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_____ ERROR at setup of test_refresh_picks_up_a_verdict_the_notary_moved ______
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_ ERROR at setup of test_settle_reads_the_current_verdict_even_without_a_refresh _
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_________ ERROR at setup of test_a_settled_escrow_cannot_be_refreshed _________
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+_ ERROR at setup of test_revoking_the_notary_blocks_settlement_not_just_attachment _
+
+notary = Contract(address='0x1273ca1b05b918ceCC09efD5a825fAf3e9baDb62', account=None, _schema={'ctor': {'params': [], 'kwparams...et_paused': {'params': [['new_paused', 'bool']], 'kwparams': {}, 'readonly': False, 'ret': 'null', 'payable': False}}})
+
+    @pytest.fixture(scope="module")
+    def escrow(notary):
+>       contract = get_contract_factory("NotarizedSettlement").deploy(args=[])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\integration\test_settlement_integration.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:142: in deploy
+    return self.build_contract(contract_address=contract_address, account=account)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ContractFactory(contract_name='NotarizedSettlement', contract_code='# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7q...ner:\n            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can pause")\n        self.paused = new_paused\n')
+contract_address = '0xa27B5ee866870165Ec043dAa7e2888a6a2E55b2c', account = None
+
+    def build_contract(
+        self,
+        contract_address: Union[Address, ChecksumAddress],
+        account: Optional[LocalAccount] = None,
+    ) -> Contract:
+        """
+        Build contract from address
+        """
+        schema = self._get_schema_with_fallback()
+        if schema is None:
+>           raise ValueError(
+                "Failed to get schema from all clients (default, hosted studio, and local)"
+            )
+E           ValueError: Failed to get schema from all clients (default, hosted studio, and local)
+
+C:\Users\dhozi\AppData\Local\Programs\Python\Python312\Lib\site-packages\gltest\contracts\contract_factory.py:102: ValueError
+=========================== short test summary info ===========================
+ERROR tests/integration/test_settlement_integration.py::test_notary_is_on_the_trust_list
+ERROR tests/integration/test_settlement_integration.py::test_untrusted_notary_cannot_be_used
+ERROR tests/integration/test_settlement_integration.py::test_revoked_notary_cannot_open_a_settlement
+ERROR tests/integration/test_settlement_integration.py::test_open_requires_two_sources
+ERROR tests/integration/test_settlement_integration.py::test_open_rejects_empty_spec
+ERROR tests/integration/test_settlement_integration.py::test_open_rejects_duplicate_only_sources
+ERROR tests/integration/test_settlement_integration.py::test_open_accepts_repeated_urls_above_the_minimum
+ERROR tests/integration/test_settlement_integration.py::test_settle_requires_attestation
+ERROR tests/integration/test_settlement_integration.py::test_challenge_requires_a_notarization
+ERROR tests/integration/test_settlement_integration.py::test_confirmed_notarization_pays_the_worker
+ERROR tests/integration/test_settlement_integration.py::test_notarization_for_another_claim_cannot_be_attached
+ERROR tests/integration/test_settlement_integration.py::test_refuted_notarization_refunds_the_payer
+ERROR tests/integration/test_settlement_integration.py::test_challenge_and_reevaluation_reach_the_notary
+ERROR tests/integration/test_settlement_integration.py::test_outcome_table_is_exposed
+ERROR tests/integration/test_settlement_integration.py::test_missing_ids_read_as_empty_rather_than_erroring
+ERROR tests/integration/test_settlement_integration.py::test_stats_track_commitments_and_outcomes
+ERROR tests/integration/test_settlement_integration.py::test_contract_balance_is_zero_on_studionet
+ERROR tests/integration/test_settlement_integration.py::test_a_bound_escrow_pays_the_worker
+ERROR tests/integration/test_settlement_integration.py::test_refresh_picks_up_a_verdict_the_notary_moved
+ERROR tests/integration/test_settlement_integration.py::test_settle_reads_the_current_verdict_even_without_a_refresh
+ERROR tests/integration/test_settlement_integration.py::test_a_settled_escrow_cannot_be_refreshed
+ERROR tests/integration/test_settlement_integration.py::test_revoking_the_notary_blocks_settlement_not_just_attachment
+============================= 22 errors in 25.49s =============================

@@ -1,0 +1,111 @@
+/* ==========================================================================
+   AI Notary — design tokens
+   Direction: a docket sheet. Cool grey-green paper, petrol ink, oxidised brass
+   as the stamp colour, verdigris for a confirmed verdict. Structure carries the
+   meaning; decoration does not.
+   ========================================================================== */
+
+:root {
+  /* --- paper (the ground) ------------------------------------------------ */
+  --paper: #e4e6e1;
+  --paper-2: #d7dad3;
+  --paper-3: #c9cdc4;
+  --paper-edge: #b6bbb1;
+
+  /* --- ink (type and dark panels) ---------------------------------------- */
+  --ink: #12242b;
+  --ink-2: #1d333c;
+  --ink-soft: #45585e;
+  --ink-faint: #6b7c81;
+  --ink-on-dark: #e9ece5;
+  --ink-on-dark-soft: #9aabb0;
+
+  /* --- accents ----------------------------------------------------------- */
+  --brass: #9a7b2e;
+  --brass-bright: #c19a3c;
+  --brass-wash: rgba(154, 123, 46, 0.12);
+  --verdigris: #2c6e63;
+  --verdigris-wash: rgba(44, 110, 99, 0.13);
+  --oxblood: #7a2e35;
+  --oxblood-wash: rgba(122, 46, 53, 0.12);
+  --slate: #6a6a5c;
+  --slate-wash: rgba(106, 106, 92, 0.14);
+
+  /* --- semantic ---------------------------------------------------------- */
+  --confirmed: var(--verdigris);
+  --refuted: var(--oxblood);
+  --inconclusive: var(--slate);
+  --accent: var(--brass);
+
+  /* --- rules (hairlines do the structural work) ------------------------- */
+  --rule: 1px solid var(--paper-edge);
+  --rule-strong: 1px solid #9aa199;
+  --rule-dark: 1px solid #2c444d;
+  --rule-faint: 1px solid rgba(18, 36, 43, 0.09);
+
+  /* --- type -------------------------------------------------------------- */
+  --font-display: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Fluid display scale, tight tracking: the serif is the voice, so it needs
+     room and negative tracking to read as an authority rather than a headline. */
+  --t-hero: clamp(2.9rem, 1.2rem + 5.4vw, 5.6rem);
+  --t-h1: clamp(2.1rem, 1.3rem + 2.4vw, 3.2rem);
+  --t-h2: clamp(1.6rem, 1.2rem + 1.4vw, 2.1rem);
+  --t-h3: 1.28rem;
+  --t-body: 1rem;
+  --t-small: 0.875rem;
+  --t-micro: 0.75rem;
+  --t-label: 0.6875rem;
+
+  --track-display: -0.022em;
+  --track-label: 0.14em;
+
+  /* --- space ------------------------------------------------------------- */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4.5rem;
+  --s-9: 6.5rem;
+
+  /* --- layout ------------------------------------------------------------ */
+  /* Wide enough to actually use a large monitor. The old 1180px left a 1440px
+     screen looking half-empty, which is what made the pages read as cramped
+     rather than composed. Text measures are capped separately (--page-narrow,
+     .prose) so a wider container never becomes a wider line. */
+  --page: 1400px;
+  --page-wide: 1600px;
+  --page-narrow: 880px;
+  --rail: 17rem;
+  --radius: 3px;
+  --radius-lg: 5px;
+
+  /* --- motion ----------------------------------------------------------- */
+  /* One easing vocabulary. A stamp lands with mass, so entrances use a firm
+     deceleration; departures are quicker, because nobody waits for an exit. */
+  --ease-stamp: cubic-bezier(0.16, 0.84, 0.28, 1);
+  --ease-inout: cubic-bezier(0.62, 0.02, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur: 260ms;
+  --dur-slow: 560ms;
+  --dur-stamp: 820ms;
+
+  --shadow-lift: 0 1px 0 var(--rule);
+}
+
+/* Users who ask for less motion get none of it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

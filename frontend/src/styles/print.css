@@ -1,0 +1,148 @@
+/* ==========================================================================
+   Print — a certificate should print as an instrument
+   ========================================================================== */
+
+/* Printing a notarised record is a real use: someone has to put it in a file.
+   So the print stylesheet is not "hide the chrome and hope" — it drops the
+   navigation, the footers, the action buttons and every interactive control,
+   and promotes the certificate to the full width of the sheet. What is left is
+   the letterhead, the claim, the stamp, the evidence and the facts. */
+
+@media print {
+  :root {
+    --paper: #ffffff;
+    --paper-2: #ffffff;
+    --paper-3: #f2f2f2;
+    --ink: #000000;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  /* Chrome that has no meaning on paper. */
+  .masthead,
+  .netstrip,
+  .footer,
+  .toasts,
+  .masthead__nav,
+  .skip,
+  .btn,
+  .copybtn,
+  .notice--warn,
+  .txstatus,
+  .empty__body + .btn,
+  .cluster:has(> .btn) {
+    display: none !important;
+  }
+
+  .docket {
+    max-width: none;
+    padding: 0;
+  }
+
+  .section {
+    padding: 1.2rem 0;
+    border-top: 1px solid #999;
+    break-inside: avoid;
+  }
+
+  /* The certificate is the whole page. */
+  .certificate {
+    border: 2px solid #000;
+    background: #fff;
+    padding: 1.6rem;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .certificate::before {
+    border-color: #000;
+  }
+
+  .certificate::after {
+    opacity: 1;
+    background:
+      linear-gradient(#000, #000) left top / 24px 2px no-repeat,
+      linear-gradient(#000, #000) left top / 2px 24px no-repeat,
+      linear-gradient(#000, #000) right top / 24px 2px no-repeat,
+      linear-gradient(#000, #000) right top / 2px 24px no-repeat,
+      linear-gradient(#000, #000) left bottom / 24px 2px no-repeat,
+      linear-gradient(#000, #000) left bottom / 2px 24px no-repeat,
+      linear-gradient(#000, #000) right bottom / 24px 2px no-repeat,
+      linear-gradient(#000, #000) right bottom / 2px 24px no-repeat;
+  }
+
+  /* The guilloche and the seal are the visual signature of the record, so they
+     print. Animations are stripped because a seal caught mid-strike would be
+     a different picture from the one on screen. */
+  .sealwrap__guilloche,
+  .guilloche {
+    display: block !important;
+  }
+
+  .seal,
+  .seal__ring-outer,
+  .seal__ring-inner,
+  .seal__ticks line,
+  .seal__banner {
+    filter: none !important;
+    animation: none !important;
+  }
+
+  .seal--confirmed .seal__ring-outer {
+    stroke: #000;
+  }
+
+  .seal--refuted .seal__ring-outer {
+    stroke: #000;
+  }
+
+  .seal__banner,
+  .seal__banner-text {
+    fill: #000;
+  }
+
+  .seal__banner-text {
+    fill: #fff;
+  }
+
+  /* Reveal elements are transparent until observed, which would print a blank
+     page. Anything revealed is forced visible for the same reason. */
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .card,
+  .srclist,
+  .stat,
+  .quote,
+  tr,
+  .notice {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  a {
+    text-decoration: none;
+    color: #000;
+  }
+
+  /* Print the destination for anything that is a link to elsewhere, so a paper
+     copy is still actionable. Internal anchors are left alone. */
+  .srclist__url::after {
+    content: ' (' attr(href) ')';
+    font-size: 0.62rem;
+    color: #555;
+    word-break: break-all;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}

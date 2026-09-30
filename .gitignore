@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+artifacts/
+.gltest_cache/
+
+# Secrets. The dev account key lives in D:\Genlayer-project\wallet\.env, which
+# has its own .gitignore. These are here so that anyone who copies a real .env
+# into this tree, or adds one for another network, still cannot commit it.
+.env
+.env.local
+.env.*.local
+*.key
+
+# Frontend
+node_modules/
+dist/
+*.local
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

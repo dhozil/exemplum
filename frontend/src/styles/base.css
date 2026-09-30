@@ -1,0 +1,349 @@
+/* ==========================================================================
+   Base — reset, typography, layout primitives
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Laid paper. Two layers, both static, because a sheet of paper does not
+   animate — adding drift here would break the one metaphor the whole interface
+   is built on, and would compete with the strike for attention.
+
+   `feTurbulence` gives the fibre; the repeating gradient gives the laid lines
+   that real security stock has, running across the sheet. The plate is fixed
+   and 160px, so the browser rasterises it once rather than filtering per frame.
+   Kept low enough to read as a surface on close inspection and disappear from
+   a normal viewing distance — grain you can see is just noise. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(18, 36, 43, 0.016) 0 1px,
+      transparent 1px 4px
+    ),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)' opacity='0.085'/%3E%3C/svg%3E");
+}
+
+/* The chrome has to sit above the paper. */
+.masthead,
+.netstrip,
+.footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* Content sits above the watermark inside .shell__main. */
+.docket {
+  z-index: 1;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: var(--track-display);
+  color: var(--ink);
+}
+
+p {
+  margin: 0 0 var(--s-4);
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: var(--paper-edge);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-color: var(--brass);
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--brass-wash);
+}
+
+/* --- the small-caps docket label ----------------------------------------
+   Structure, not decoration: every label names a field of the record. */
+
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  display: block;
+}
+
+.label--on-dark {
+  color: var(--ink-on-dark-soft);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+}
+
+.hash {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--ink-soft);
+  word-break: break-all;
+}
+
+/* `break-all` is right for a hash and wrong for a sentence: it splits words
+   mid-character ("exis / ts."). Anything in a prose context wraps at word
+   boundaries instead and only breaks a word that genuinely cannot fit. */
+.hash--prose,
+.split__aside .hash,
+.field__hint code {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* --- page shell --------------------------------------------------------- */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell__main {
+  flex: 1;
+}
+
+/* Light falls on the sheet from above. A flat fill across three thousand pixels
+   reads as a colour swatch, not as paper; a gentle vertical shift is nearly
+   invisible per pixel and is the difference between a background and a
+   surface. It lives on the content area rather than on `body` so it does not
+   fight the sticky masthead, which sits over the top of it. */
+.shell__main {
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    #e8eae5 0%,
+    var(--paper) 18%,
+    var(--paper) 55%,
+    #e1e3de 100%
+  );
+}
+
+/* The watermark. Security-printed stock carries one and plain stock does not,
+   and that difference is most of what makes the sheet look expensive. It fills
+   the dead space either side of the content column on a wide screen, which is
+   where the page was reading emptiest, and it is the same guilloche the seal is
+   engraved with rather than a second, competing ornament. */
+.watermark {
+  position: absolute;
+  top: 5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  display: none;
+  line-height: 0;
+}
+
+/* Only where there is actually room for it. Below this the content fills the
+   viewport and a watermark would sit under the text instead of beside it. */
+@media (min-width: 1180px) {
+  .watermark {
+    display: block;
+  }
+}
+
+/* The docket grid: fixed column with hairline rules, like a ledger sheet.
+   Rules are structural, so they only appear where the layout needs them. */
+.docket {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 0 var(--s-5);
+  position: relative;
+}
+
+.docket--narrow {
+  max-width: var(--page-narrow);
+}
+
+@media (min-width: 900px) {
+  .docket {
+    padding: 0 var(--s-6);
+  }
+}
+
+/* Sections that pair a left eyebrow rail with content. */
+.split {
+  display: grid;
+  gap: var(--s-5);
+}
+
+@media (min-width: 900px) {
+  .split {
+    grid-template-columns: var(--rail) 1fr;
+    gap: var(--s-6);
+  }
+
+  .split--wide-first {
+    grid-template-columns: 1fr var(--rail);
+  }
+}
+
+.split__aside {
+  padding-top: 0.45rem;
+}
+
+@media (min-width: 900px) {
+  .split__aside {
+    position: sticky;
+    top: var(--s-5);
+    align-self: start;
+  }
+}
+
+.section {
+  padding: var(--s-7) 0;
+  border-top: var(--rule);
+}
+
+.section:first-child {
+  border-top: none;
+}
+
+.section--tight {
+  padding: var(--s-6) 0;
+}
+
+.section__eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+
+.section__eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+/* --- prose -------------------------------------------------------------- */
+
+.prose {
+  max-width: 68ch;
+  color: var(--ink-soft);
+}
+
+.prose strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.prose a {
+  color: var(--ink);
+}
+
+.lede {
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 1rem + 0.5vw, 1.4rem);
+  line-height: 1.45;
+  color: var(--ink-soft);
+  max-width: 54ch;
+}
+
+/* --- utility ------------------------------------------------------------ */
+
+.stack > * + * {
+  margin-top: var(--s-4);
+}
+
+.stack-sm > * + * {
+  margin-top: var(--s-2);
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: center;
+}
+
+.cluster--tight {
+  gap: var(--s-2);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dim {
+  color: var(--ink-faint);
+}
