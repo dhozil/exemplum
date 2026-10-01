@@ -484,6 +484,27 @@ GEN and asserts the payee's chain-layer balance actually moves.
 > say whether all the value it holds is accounted for. They can disagree, and
 > after a failed payable call they will — which is the point of separating them
 > instead of folding the gap into one reassuring boolean.
+>
+> **The special-methods claim was retested against the docs, and it holds.**
+> `features/special-methods` in the documentation describes `__receive__` and
+> `__handle_undefined_method__` as supported, with a dispatch diagram for
+> choosing between them, so the earlier note above deserved a real test rather
+> than an inference from a lint message. A probe declaring both exactly as
+> documented — `__receive__` as `@gl.public.write.payable` — was deployed to
+> StudioNet:
+>
+> - `genvm-lint` refuses it: `'__receive__' requires @gl.public.write
+>   decorator`, plus `public method names should not start with '__'`.
+> - The **runner** refuses it too, and this is the part the linter cannot tell
+>   you. The deploy returned receipt status 1 and an address, so it looks like
+>   it worked, but every subsequent `getContractSchema` throws
+>   `TypeError: public method names should not start with '__'` from
+>   `get_schema.py:187`.
+>
+> So a contract declaring them is not rejected at deploy time; it deploys and is
+> then permanently uncallable, by anyone, forever. That is a worse failure mode
+> than an outright rejection, and it is why the probe lives in the wallet repo
+> rather than being deleted.
 
 
 

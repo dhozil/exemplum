@@ -257,3 +257,32 @@ Not oversights. Do not "fix" them without deciding the trust model first.
 - **The escrow's sources are chosen by the payer.** The truth of a settlement is
   defined by whoever is paying. That is a product decision.
 - **Everything runs on StudioNet**, which is ephemeral and rate-limited.
+
+## Read the docs before concluding a platform limit
+
+A documented limitation is a claim about the platform, so it needs evidence
+from the platform, not from a tool's error message.
+
+`__receive__` is the example. `features/special-methods` describes it as
+supported. `genvm-lint` rejects it. I read that lint error as "unavailable on
+this runner" and wrote the limitation down — twice — without checking whether
+the lint tool and the runner share the same restriction. They do, but the
+linter could never have told me that: deploying a probe declaring `__receive__`
+and `__handle_undefined_method__` as documented returns receipt status 1 and an
+address, and *then* every schema call throws. The contract is live and
+permanently uncallable.
+
+Two lessons, both from getting this wrong:
+
+- **A successful deploy is not a working contract.** Receipt status 1 is about
+  the transaction, not the contract's ability to answer a schema request.
+  Always ask for the schema back and check the method list.
+- **When a limit is already in the README, treat re-deriving it as a task with
+  a deliverable**, not a formality. "Read the docs carefully" means fetching the
+  page that could contradict you and following it to a test.
+
+The runner pin format (`# { "Depends": "py-genlayer:<hash>" }`) was checked
+against `first-contract` in the docs and matches. One thing left unresolved:
+the runner logs `runner comment does not start with version, using default
+v0.1.0` during execution, so it is not established that the pin is honoured at
+execution time rather than only recorded in source.
