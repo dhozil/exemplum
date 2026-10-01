@@ -559,10 +559,10 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **192** direct-mode tests
+Current status: `genvm-lint` clean on both contracts, **199** direct-mode tests
 passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
-The `gltest` integration suite runs against StudioNet: **22 of 22 pass**. It
+The `gltest` integration suite runs against StudioNet: **23 of 23 pass**. It
 could not run at all for most of this work, and the cause turned out to be
 narrower than first recorded. **Deploying does not require ASCII source.**
 deploy_contract passes the code through serialize(), which is happy with

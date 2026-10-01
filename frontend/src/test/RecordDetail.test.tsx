@@ -159,6 +159,40 @@ describe('RecordDetail re-evaluation lock', () => {
     expect(button.getAttribute('title')).toMatch(/challenge is needed first/i);
   });
 
+  /* The cooldown is enforced on chain whether or not the button agrees, so an
+     enabled button here means the user spends a transaction to be told no. The
+     challenge survives the wait, which is the reason to show the remaining time
+     rather than a bare refusal. */
+  it('locks Re-evaluate during the cooldown even with a challenge pending', async () => {
+    const justNow = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    mocks.record = { ...BASE, pending_reevaluation: true, last_evaluated_at: justNow };
+    renderPage();
+    expect(await screen.findByRole('button', { name: /re-evaluate in \d+ min/i })).toBeDisabled();
+  });
+
+  it('tells the user their challenge is kept during the cooldown', async () => {
+    const justNow = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    mocks.record = { ...BASE, pending_reevaluation: true, last_evaluated_at: justNow };
+    renderPage();
+    expect(await screen.findByText(/your challenge is kept/i)).toBeInTheDocument();
+  });
+
+  it('re-enables Re-evaluate once the cooldown has passed', async () => {
+    const longAgo = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    mocks.record = { ...BASE, pending_reevaluation: true, last_evaluated_at: longAgo };
+    renderPage();
+    expect(await screen.findByRole('button', { name: /^re-evaluate$/i })).toBeEnabled();
+  });
+
+  /* A record that has never been re-evaluated carries no last_evaluated_at, and
+     the contract applies no cooldown to it. Treating that as "cooling down"
+     would block the first dispute, which is the one that matters most. */
+  it('does not apply a cooldown to a never-re-evaluated record', async () => {
+    mocks.record = { ...BASE, pending_reevaluation: true, last_evaluated_at: '' };
+    renderPage();
+    expect(await screen.findByRole('button', { name: /^re-evaluate$/i })).toBeEnabled();
+  });
+
   it('does not fire a transaction from the locked control', async () => {
     mocks.record = { ...BASE, pending_reevaluation: false };
     renderPage();

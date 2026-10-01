@@ -5,6 +5,9 @@ import pytest
 
 CONTRACT = "contracts/ai_notary.py"
 
+# The empty address, mirroring ZERO_ADDRESS in the contract.
+ZERO_ADDR = "0x0000000000000000000000000000000000000000"
+
 SOURCES = ["https://a.example.com/post", "https://b.example.com/post"]
 
 
@@ -1096,3 +1099,121 @@ def test_a_refused_reevaluation_does_not_burn_the_challenge(direct_deploy, direc
     _advance(direct_vm, 2)
     notary.re_evaluate(record_id)
     assert notary.get_record(record_id)["revision"] == 2
+
+
+# --- ownership handover ------------------------------------------------------
+#
+# The notary has the same two-step handover as the settlement contract: pause
+# and the trust list are owner-only, and this key is the only route out of
+# `paused`, so a lost or compromised key needs a successor the owner named in
+# advance.
+#
+# These are the notary's versions. The settlement ones were written first, and
+# the failure this guards against is the same in both: `nominate_owner` moving
+# `owner` on the spot, which would hand the trust list to whoever the current
+# owner names with a single transaction and no way to refuse.
+
+def _addr(vm) -> str:
+    """`direct_vm.sender` is a raw 20-byte address, not a hex string.
+
+    `str()` on it gives `b'\\xdc\\x18...'`, which never equals the checksummed
+    string the contract returns, so comparing them directly fails on a correct
+    contract. The settlement tests get away with `addrs[...]` (already strings
+    from `create_test_addresses`); the default sender does not.
+    """
+    raw = vm.sender
+    if isinstance(raw, str):
+        return raw
+    return "0x" + raw.hex() if not raw.hex().startswith("0x") else raw.hex()
+
+
+def test_notary_owner_is_the_deployer_and_there_is_no_nomination(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    report = notary.get_ownership()
+    assert report["owner"].lower() == _addr(direct_vm).lower(), "the deployer owns it"
+    assert report["pending_owner"].lower() == ZERO_ADDR.lower(), (
+        "a fresh contract has no successor"
+    )
+
+
+def test_nominating_the_notary_owner_does_not_move_ownership(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    heir = "0x" + "7a" * 20
+
+    notary.nominate_owner(heir)
+    report = notary.get_ownership()
+    assert report["pending_owner"].lower() == heir.lower(), "the heir is recorded as the nominee"
+    assert report["owner"].lower() != heir.lower(), "nominating is not handing over"
+
+
+def test_a_stranger_cannot_accept_the_notary_nomination(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    notary.nominate_owner("0x" + "7a" * 20)
+
+    direct_vm.sender = "0x" + "8b" * 20
+    with pytest.raises(Exception) as exc:
+        notary.accept_ownership()
+    assert "no pending nomination" in str(exc.value)
+
+
+def test_the_nominee_can_accept_and_the_notary_owner_moves(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    heir = "0x" + "7a" * 20
+    notary.nominate_owner(heir)
+
+    direct_vm.sender = heir
+    notary.accept_ownership()
+
+    report = notary.get_ownership()
+    assert report["owner"].lower() == heir.lower(), "the heir now owns the notary"
+    assert report["pending_owner"] == ZERO_ADDR, "the nomination is consumed"
+
+
+def test_the_old_notary_owner_loses_its_powers_after_handover(direct_deploy, direct_vm):
+    """Ownership is only real if it takes the old owner's rights away.
+
+    Naming this explicitly, because a handover that grants the new owner
+    everything while leaving the old one intact would look correct in the
+    `get_ownership` test and leave the trust list writable by both keys.
+    """
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    old_owner = direct_vm.sender
+    heir = "0x" + "7a" * 20
+
+    notary.nominate_owner(heir)
+    direct_vm.sender = heir
+    notary.accept_ownership()
+
+    direct_vm.sender = old_owner
+    with pytest.raises(Exception) as exc:
+        notary.set_paused(True)
+    assert "owner" in str(exc.value).lower()
+
+
+def test_the_notary_nomination_can_be_replaced_before_being_accepted(direct_deploy, direct_vm):
+    """The owner is not locked into the first successor they name.
+
+    Nominating a wrong address should not require accepting it first.
+    """
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    notary.nominate_owner("0x" + "7a" * 20)
+    notary.nominate_owner("0x" + "9c" * 20)
+
+    report = notary.get_ownership()
+    assert report["pending_owner"].lower() == ("0x" + "9c" * 20).lower(), "the later nomination wins"
+
+
+def test_a_non_owner_cannot_nominate_a_notary_successor(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+
+    direct_vm.sender = "0x" + "8b" * 20
+    with pytest.raises(Exception) as exc:
+        notary.nominate_owner("0x" + "8b" * 20)
+    assert "owner" in str(exc.value).lower()

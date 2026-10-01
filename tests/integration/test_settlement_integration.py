@@ -408,6 +408,52 @@ def test_settle_reads_the_current_verdict_even_without_a_refresh(escrow, notary)
 
 
 @pytest.mark.slow
+def test_the_cooldown_holds_on_a_real_network(escrow, notary):
+    """The one-hour cooldown, exercised on chain rather than in a warped clock.
+
+    Direct-mode tests cover this by moving `gl.message_raw['datetime']` forward,
+    which proves the arithmetic and nothing about the deployed contract. This
+    asserts the property that actually protects a payee: a second dispute,
+    correctly challenged and immediately followed by a re-evaluation, is
+    refused, and the record does not move.
+
+    Refused is the whole point. A cooldown that still lets a second
+    re-evaluation through would pass every test that only checks the happy path
+    while leaving the rate limit unenforced on the network that matters.
+    """
+    escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
+    record_id = notarize(notary, TRUE_CLAIM)
+    assert tx_execution_succeeded(escrow.attach_notarization(args=[escrow_id, record_id]).transact())
+
+    assert tx_execution_succeeded(
+        notary.challenge(args=[record_id, "first dispute"]).transact()
+    )
+    assert tx_execution_succeeded(notary.re_evaluate(args=[record_id]).transact())
+    revision_after_first = notary.get_record(args=[record_id]).call()["revision"]
+    assert revision_after_first >= 1
+
+    # A second, properly challenged dispute, straight away. The challenge is
+    # fresh, so only the cooldown can stop this.
+    assert tx_execution_succeeded(
+        notary.challenge(args=[record_id, "immediate second dispute"]).transact()
+    )
+    assert tx_execution_failed(notary.re_evaluate(args=[record_id]).transact()), (
+        "the cooldown must refuse a second re-evaluation inside the window"
+    )
+
+    assert notary.get_record(args=[record_id]).call()["revision"] == revision_after_first, (
+        "a refused re-evaluation must leave the revision alone"
+    )
+
+    # And the refusal must not have burned the pending challenge, otherwise the
+    # record is wedged until the window expires: the dispute would be neither
+    # actionable nor replaceable.
+    assert notary.get_record(args=[record_id]).call()["pending_reevaluation"], (
+        "a refused re-evaluation must not consume the challenge"
+    )
+
+
+@pytest.mark.slow
 def test_a_settled_escrow_cannot_be_refreshed(escrow, notary):
     escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
     record_id = notarize(notary, TRUE_CLAIM)

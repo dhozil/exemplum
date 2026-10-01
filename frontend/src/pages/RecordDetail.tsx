@@ -4,7 +4,7 @@ import { challengeRecord, getRecord, reevaluate } from '../lib/api';
 import { useQuery } from '../lib/useQuery';
 import { useTx } from '../lib/useTx';
 import { signer, useAccount } from '../lib/wallet';
-import { formatDateTime, pluralise, relativeTo } from '../lib/format';
+import { cooldownEnd, formatDateTime, pluralise, relativeTo } from '../lib/format';
 import { parseRevisionLedger, type NotarizationRecord } from '../lib/types';
 import { TheSeal } from '../components/TheSeal';
 import { Reveal } from '../components/Reveal';
@@ -122,6 +122,18 @@ function RecordBody({ record }: { record: NotarizationRecord }) {
      let people discover that by hitting an error, the button is disabled until a
      challenge exists, and says why. */
   const canReevaluate = record.pending_reevaluation;
+
+  /* The cooldown is the other half of the same guard, and the contract will
+     refuse a re-evaluation inside the window whatever the button says. A
+     challenge stays pending and usable afterwards, so this is a wait, not a
+     lock-out — but without it the button is enabled, the click is rejected on
+     chain, and the page shows an error for something it could have explained.
+     Read from the record the page already has rather than from a new call, so
+     this cannot fail separately from rendering the record. */
+  const cooldownEndsAt = cooldownEnd(record.last_evaluated_at);
+  const coolingDown = cooldownEndsAt !== null && cooldownEndsAt > Date.now();
+  const reevaluateBlocked = !canReevaluate || coolingDown;
+  const cooldownMinutes = coolingDown ? Math.ceil((cooldownEndsAt - Date.now()) / 60000) : 0;
 
   /* What each revision actually relied on, oldest first. The per-source list
      above shows only the current round, so without this a re-evaluation would
@@ -347,20 +359,30 @@ function RecordBody({ record }: { record: NotarizationRecord }) {
                      type="button"
                      className="btn btn--ghost"
                      onClick={doReevaluate}
-                     disabled={!canWrite || busy || !canReevaluate}
+                     disabled={!canWrite || busy || reevaluateBlocked}
                      title={
-                       canReevaluate
-                         ? 'Runs the whole task again against live evidence'
-                         : 'A challenge is needed first — each one funds exactly one re-evaluation'
+                       coolingDown
+                         ? `The notary re-checks at most once an hour — ${cooldownMinutes} min left. Your challenge stays valid.`
+                         : canReevaluate
+                           ? 'Runs the whole task again against live evidence'
+                           : 'A challenge is needed first — each one funds exactly one re-evaluation'
                      }
                    >
                      {pendingAction === 'reevaluate' && busy
                        ? 'Re-evaluating…'
-                       : canReevaluate
-                         ? 'Re-evaluate'
-                         : 'Challenge first'}
+                       : coolingDown
+                         ? `Re-evaluate in ${cooldownMinutes} min`
+                         : canReevaluate
+                           ? 'Re-evaluate'
+                           : 'Challenge first'}
                    </button>
 
+                 {coolingDown && (
+                   <p className="field__hint" style={{ marginTop: 'var(--s-3)' }}>
+                     Re-evaluations are limited to once an hour per record. Your challenge is kept, so it
+                     runs as soon as the window passes.
+                   </p>
+                 )}
               </div>
             </form>
 

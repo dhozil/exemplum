@@ -156,3 +156,22 @@ export const CHAIN_LABEL = CHAIN_NAME;
 export function pluralise(n: number, one: string, many?: string): string {
   return n === 1 ? one : (many ?? `${one}s`);
 }
+
+/**
+ * When a re-evaluation becomes available again, or null if it already is.
+ *
+ * Mirrors `REEVALUATION_COOLDOWN_SECONDS` in the contract. Duplicated rather
+ * than fetched because the page has to render the button state from data it
+ * already holds, and a separate call that can fail would leave the button
+ * enabled exactly when it should not be.
+ *
+ * `last_evaluated_at` is empty on a record that has never been re-evaluated,
+ * and on a deployment predating the cooldown — both mean "no wait", so both
+ * return null and leave the button alone.
+ */
+export function cooldownEnd(lastEvaluatedAt: string | undefined, windowSeconds = 3600): number | null {
+  if (!lastEvaluatedAt) return null;
+  const then = new Date(lastEvaluatedAt).getTime();
+  if (Number.isNaN(then)) return null;
+  return then + windowSeconds * 1000;
+}

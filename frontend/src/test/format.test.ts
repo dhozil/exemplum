@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatGen, parseGen } from '../lib/format';
+import { cooldownEnd, formatGen, parseGen } from '../lib/format';
 
 /**
  * GEN amounts are u256 on chain and arrive as `bigint` after JSON parsing. Every
@@ -68,5 +68,31 @@ describe('parseGen', () => {
     // A negative top-up is not a thing, and silently allowing one would let the
     // UI offer a button the contract must reject.
     expect(parseGen('-1').error).toBeTruthy();
+  });
+});
+
+describe('cooldownEnd', () => {
+  const HOUR = 3600 * 1000;
+
+  it('returns an hour past the last evaluation', () => {
+    const at = '2026-06-01T12:00:00Z';
+    expect(cooldownEnd(at)).toBe(new Date(at).getTime() + HOUR);
+  });
+
+  /* A record that has never been re-evaluated has no last_evaluated_at. The
+     contract applies no cooldown in that case, so returning null here is what
+     keeps the first dispute from being blocked by the button. */
+  it('returns null for a record that was never re-evaluated', () => {
+    expect(cooldownEnd(undefined)).toBeNull();
+    expect(cooldownEnd('')).toBeNull();
+  });
+
+  it('returns null for unparseable input rather than NaN', () => {
+    expect(cooldownEnd('not a date')).toBeNull();
+  });
+
+  it('honours a different window, so the contract value is the only magic number', () => {
+    const at = '2026-06-01T12:00:00Z';
+    expect(cooldownEnd(at, 60)).toBe(new Date(at).getTime() + 60000);
   });
 });
