@@ -1060,16 +1060,25 @@ def test_balanced_and_fully_accounted_answer_different_questions(settlement):
 # This is here because it has bitten twice, and the second time it cost a full
 # integration run.
 #
-# `gltest` builds a schema with `get_contract_schema_for_code`, which encodes
-# the source as ASCII. One U+2014 anywhere in a contract file makes that call
-# throw, the factory swallows the failure per client, and every test in the
-# suite reports the same thing:
+# The reason is narrower than "the chain requires ASCII", which is what an
+# earlier note here claimed. It does not. Praetor's contract carries box-drawing
+# characters in its section separators and deploys fine, because
+# `deploy_contract` puts the source through `serialize()`, which handles UTF-8
+# bytes. What breaks is `get_contract_schema_for_code`, which calls
+# `eth_utils.hexadecimal.encode_hex` on the source and that needs ASCII.
+#
+# `gltest` builds every contract factory from a schema-for-code call, so one
+# em-dash makes that call throw for every test in the suite, the factory
+# swallows the failure per client, and all of them report:
 #
 #     ValueError: Failed to get schema from all clients
 #
 # which reads like a malformed contract, passes `genvm-lint`, and is fixed by
-# changing one dash in a comment. Em-dashes are easy to type by habit, which is
-# exactly why this is a test rather than a rule.
+# changing one dash in a comment. Staying ASCII is therefore a condition for
+# being testable here, not for being deployable.
+#
+# Em-dashes are easy to type by habit, which is why this is a test rather than
+# a rule.
 
 CONTRACT_FILES = ["contracts/ai_notary.py", "contracts/notarized_settlement.py"]
 

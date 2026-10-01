@@ -563,8 +563,17 @@ Current status: `genvm-lint` clean on both contracts, **192** direct-mode tests
 passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
 The `gltest` integration suite runs against StudioNet: **22 of 22 pass**. It
-could not run at all for most of this work, and the cause was not the one first
-recorded here — see the ASCII note in
+could not run at all for most of this work, and the cause turned out to be
+narrower than first recorded. **Deploying does not require ASCII source.**
+deploy_contract passes the code through serialize(), which is happy with
+UTF-8 bytes, and Praetor's contract carries box-drawing characters in its
+section separators and deploys fine. What requires ASCII is
+get_contract_schema_for_code, which calls th_utils.hexadecimal.encode_hex
+on the source; gltest builds every contract factory through that call, so a
+single em-dash in a comment makes the entire suite fail with Failed to get
+schema from all clients - an error that reads like a malformed contract and
+passes genvm-lint. Staying ASCII is what keeps the contracts testable here,
+not deployable. See also [Platform gotchas](#platform-gottchas-hit-while-building) for why an em-dash turned up twice. — see the ASCII note in
 [Platform gotchas](#platform-gottchas-hit-while-building). The money path is
 covered by the `prove_*.py` scripts instead, because this `gltest` build cannot
 send value.

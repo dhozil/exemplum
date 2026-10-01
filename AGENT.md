@@ -277,6 +277,22 @@ Two lessons, both from getting this wrong:
 - **A successful deploy is not a working contract.** Receipt status 1 is about
   the transaction, not the contract's ability to answer a schema request.
   Always ask for the schema back and check the method list.
+
+- **Say which constraint you actually found.** "Contract source must be ASCII"
+  was wrong, and wrong in the direction that hides the actual mechanism. Deploys
+  are fine with non-ASCII source — `deploy_contract` serialises the code as
+  UTF-8 bytes. It is `get_contract_schema_for_code` that hex-encodes with an
+  ASCII codec, and only `gltest` and similar schema-from-source tooling go
+  through it. Praetor's contract has box-drawing characters in its section
+  comments and deploys; it would fail every gltest. Naming the real constraint
+  (`getContractSchemaForCode` needs ASCII) tells you where else it can bite; a
+  vague "must be ASCII" sounds like a chain rule and makes non-ASCII look unsafe
+  to deploy at all.
+
+- **Cross-check a pin against a working reference.** The `Depends` hash was
+  pinned from the docs and assumed good. Praetor's contract, found later, pins
+  the identical `1jb45aa8...`, which turns "a hash from a doc page" into "the
+  hash a working project uses". Cheap corroboration, worth doing at pin time.
 - **When a limit is already in the README, treat re-deriving it as a task with
   a deliverable**, not a formality. "Read the docs carefully" means fetching the
   page that could contradict you and following it to a test.
