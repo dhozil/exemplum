@@ -351,9 +351,17 @@ def test_refresh_picks_up_a_verdict_the_notary_moved(escrow, notary):
     assert before["bound_revision"] == 0
 
     # Someone disputes the record and the notary re-runs consensus.
+    #
+    # The challenge is not optional. `re_evaluate` refuses to re-run consensus
+    # without an unconsumed one, so a dispute that does not say why should not
+    # be able to move a verdict that a settlement is about to act on.
+    assert tx_execution_succeeded(
+        notary.challenge(args=[record_id, "the source changed after notarization"]).transact()
+    )
     assert tx_execution_succeeded(notary.re_evaluate(args=[record_id]).transact())
     record = notary.get_record(args=[record_id]).call()
     assert record["revision"] >= 1
+
 
     # The escrow now knows it is behind, and says so rather than hiding it.
     stale = escrow.get_verdict_freshness(args=[escrow_id]).call()
@@ -384,7 +392,12 @@ def test_settle_reads_the_current_verdict_even_without_a_refresh(escrow, notary)
     escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
     record_id = notarize(notary, TRUE_CLAIM)
     assert tx_execution_succeeded(escrow.attach_notarization(args=[escrow_id, record_id]).transact())
+    # A dispute has to be a challenge before it can be a re-evaluation.
+    assert tx_execution_succeeded(
+        notary.challenge(args=[record_id, "disputed for this test"]).transact()
+    )
     assert tx_execution_succeeded(notary.re_evaluate(args=[record_id]).transact())
+
 
     # No refresh_verdict call. settle still re-reads and records the revision it
     # settled on, so the audit trail shows which conclusion released the money.

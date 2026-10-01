@@ -1053,3 +1053,87 @@ def test_balanced_and_fully_accounted_answer_different_questions(settlement):
         report["surplus"] == 0 and report["shortfall"] == 0
     ), "balanced is a statement about the books only"
     assert report["fully_accounted"] == (report["unattributed"] == 0)
+
+
+# --- contract source must stay ASCII ---------------------------------------
+#
+# This is here because it has bitten twice, and the second time it cost a full
+# integration run.
+#
+# `gltest` builds a schema with `get_contract_schema_for_code`, which encodes
+# the source as ASCII. One U+2014 anywhere in a contract file makes that call
+# throw, the factory swallows the failure per client, and every test in the
+# suite reports the same thing:
+#
+#     ValueError: Failed to get schema from all clients
+#
+# which reads like a malformed contract, passes `genvm-lint`, and is fixed by
+# changing one dash in a comment. Em-dashes are easy to type by habit, which is
+# exactly why this is a test rather than a rule.
+
+CONTRACT_FILES = ["contracts/ai_notary.py", "contracts/notarized_settlement.py"]
+
+
+def test_contract_source_is_ascii():
+    offenders = {}
+    for path in CONTRACT_FILES:
+        text = open(path, encoding="utf-8").read()
+        bad = {}
+        for ch in set(text):
+            if ord(ch) > 127:
+                bad[ch] = text.count(ch)
+        if bad:
+            offenders[path] = {
+                f"U+{ord(ch):04X} {ch!r}": count for ch, count in bad.items()
+            }
+    assert not offenders, (
+        "non-ASCII in contract source breaks getContractSchemaForCode, and gltest "
+        f"reports it as a schema failure for every test: {offenders}"
+    )
+
+
+def _pinned_runner(path):
+    import json
+    import re
+
+    first = open(path, encoding="utf-8").readline()
+    match = re.search(r'\{\s*"Depends"\s*:\s*"([^"]+)"\s*\}', first)
+    assert match, f"{path} has no Depends header on line 1"
+    json.loads(first[first.index("{"):])  # the header itself is valid JSON
+    spec = match.group(1)
+    assert spec.startswith("py-genlayer:"), f"{path}: {spec}"
+    return spec.split(":", 1)[1]
+
+
+def test_contract_source_declares_a_pinned_runner():
+    """A concrete pin, not `test` or `latest`.
+
+    `{"Depends": "py-genlayer:test"}` is the documentation placeholder. Pinning
+    `test` makes the contract move under you between runs, which is the opposite
+    of what a pin is for.
+
+    The pin is an opaque token, not hex - the real ones contain characters
+    outside [0-9a-f] - so what is asserted is that it is a long opaque string
+    and not a tag, rather than a character class this test would get wrong.
+    """
+    versions = {}
+    for path in CONTRACT_FILES:
+        version = _pinned_runner(path)
+        assert version not in ("test", "latest"), (
+            f"{path} pins {version!r}, which is a moving target rather than a pin"
+        )
+        assert len(version) >= 32, f"{path}: {version!r} is too short to be a pin"
+        assert re.match(r"^[0-9a-z]+$", version), (
+            f"{path}: {version!r} should be a lowercase opaque token"
+        )
+        versions[path] = version
+
+    # The two contracts talk to each other — NotarizedSettlement reads AINotary
+    # across a boundary — so a version mismatch between them is not a warning,
+    # it is a real interoperability risk.
+    pinned = set(versions.values())
+    assert len(pinned) == 1, f"contracts pin different runners: {versions}"
+
+
+import re  # noqa: E402  used by the tests above
+

@@ -475,7 +475,7 @@ class NotarizedSettlement(gl.Contract):
             "surplus": surplus,
             "shortfall": shortfall,
             # Measured on StudioNet: GEN attached to a payable call that reverts
-            # lands here and cannot leave — no hook can route it, because there
+            # lands here and cannot leave: no hook can route it, because there
             # is no escrow id to route it to. So this is expected to be non-zero
             # after any failed payable call, and it is reported rather than
             # folded into the balance.

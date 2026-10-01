@@ -496,7 +496,7 @@ contracts/ai_notary.py                      12 methods  – attestation + consen
 contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
 tests/test_ai_notary.py                      91 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     92 direct-mode tests
+tests/test_settlement.py                     94 direct-mode tests
 tests/integration/.                          39 tests against real GenVM
 frontend/.                                   React dApp for both contracts (31 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
@@ -538,11 +538,10 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **190** direct-mode tests
+Current status: `genvm-lint` clean on both contracts, **192** direct-mode tests
 passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
-The `gltest` integration suite runs against StudioNet: 19 of 22 pass, the
-other three failing on Cloudflare returning HTML where JSON was expected. It
+The `gltest` integration suite runs against StudioNet: **22 of 22 pass**. It
 could not run at all for most of this work, and the cause was not the one first
 recorded here — see the ASCII note in
 [Platform gotchas](#platform-gottchas-hit-while-building). The money path is
