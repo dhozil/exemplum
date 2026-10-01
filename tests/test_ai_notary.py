@@ -34,6 +34,31 @@ def judge_response(verdict, confidence, quote="", reasoning="matched"):
 
 
 
+def _advance(direct_vm, hours: float) -> None:
+    """Move the contract's clock forward by `hours`.
+
+    Both clocks have to move, and that is the whole difficulty. `vm.warp()`
+    only sets the VM's own `_datetime`; the contract reads time from
+    `gl.message_raw["datetime"]`, which `_refresh_gl_message` never
+    propagates it into. A test that warps only one of them sees no time pass.
+
+    Used by the re-evaluation cooldown tests, which are the only place in this
+    suite that needs time to actually be different between two calls.
+    """
+    import sys
+
+    direct_vm.warp(hours)
+    gl = sys.modules.get("genlayer.gl")
+    if gl is not None and getattr(gl, "message_raw", None) is not None:
+        raw = gl.message_raw["datetime"]
+        from datetime import datetime, timedelta
+
+        moved = datetime.fromisoformat(str(raw).replace("Z", "+00:00")) + timedelta(
+            hours=hours
+        )
+        gl.message_raw["datetime"] = moved.isoformat()
+
+
 def mock_all_confirmed(vm):
     for url in SOURCES:
         mock_source(vm, url, "This release is version 2.4.0 and was published today.")
@@ -667,6 +692,7 @@ def test_rechallenging_buys_a_second_reevaluation(direct_deploy, direct_vm):
     for expected_revision in (1, 2, 3):
         notary.challenge(record_id, f"dispute {expected_revision}")
         notary.re_evaluate(record_id)
+        _advance(direct_vm, 2)
         rec = notary.get_record(record_id)
         assert rec["revision"] == expected_revision
         assert rec["pending_reevaluation"] is False
@@ -804,6 +830,8 @@ def test_the_evidence_ledger_is_bounded(direct_deploy, direct_vm):
     for i in range(rounds):
         notary.challenge(record_id, f"dispute {i}")
         notary.re_evaluate(record_id)
+        # Past the cooldown, otherwise the next round is (correctly) refused.
+        _advance(direct_vm, 2)
 
     rec = notary.get_record(record_id)
     entries = _entries(rec)
@@ -963,3 +991,108 @@ def test_the_check_applies_on_every_revision(direct_vm, direct_deploy):
     )
     latest = _entries(rec)[-1]
     assert all(s["evidence_quote"] == "" for s in latest["sources"])
+
+
+# --- the re-evaluation cooldown --------------------------------------------
+#
+# Requiring a challenge was not sufficient on its own. A challenge is one
+# transaction, so an attacker willing to spend gas could buy challenges in a loop
+# and keep forcing re-evaluations. Web fetches and LLM calls are flaky, so some
+# rounds come back unavailable or inconclusive, and a payee whose escrow is
+# mid-settlement could be pushed into that state over and over.
+#
+# This is a rate limit, not a total, and deliberately not a slashed stake: a stake
+# would mean escrow funds acting as collateral for someone else's dispute, which
+# mixes custody into the trust list, and a forgeable stake is a new griefing
+# surface of its own.
+
+def test_a_fresh_record_can_still_be_disputed_immediately(direct_deploy, direct_vm):
+    """The cooldown must not swallow the first legitimate dispute.
+
+    `last_evaluated_at` is set at creation too, so reusing it for the cooldown
+    would block exactly this case - and the first dispute is the one that matters
+    most.
+    """
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    record_id = notary.notarize("api_data", "version 2.4.0 was published", SOURCES)
+
+    notary.challenge(record_id, "disputed immediately")
+    notary.re_evaluate(record_id)
+    assert notary.get_record(record_id)["revision"] == 1
+
+
+def test_a_second_revaluation_inside_the_window_is_refused(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    record_id = notary.notarize("api_data", "version 2.4.0 was published", SOURCES)
+
+    notary.challenge(record_id, "first dispute")
+    notary.re_evaluate(record_id)
+
+    # A fresh challenge is not enough on its own; the window has to pass.
+    notary.challenge(record_id, "immediate second attempt")
+    with pytest.raises(Exception) as exc:
+        notary.re_evaluate(record_id)
+    assert "re-evaluated" in str(exc.value)
+    assert notary.get_record(record_id)["revision"] == 1, (
+        "a refused re-evaluation must not move the revision"
+    )
+
+
+def test_the_refusal_says_how_long_to_wait(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    record_id = notary.notarize("api_data", "version 2.4.0 was published", SOURCES)
+    notary.challenge(record_id, "first")
+    notary.re_evaluate(record_id)
+    notary.challenge(record_id, "second")
+
+    with pytest.raises(Exception) as exc:
+        notary.re_evaluate(record_id)
+    message = str(exc.value)
+    assert "wait" in message, "the caller needs to know when it becomes possible"
+
+
+def test_the_window_opens_again_once_enough_time_passes(direct_deploy, direct_vm):
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    record_id = notary.notarize("api_data", "version 2.4.0 was published", SOURCES)
+
+    notary.challenge(record_id, "first")
+    notary.re_evaluate(record_id)
+
+    _advance(direct_vm, 2)  # comfortably past the 1h window
+    notary.challenge(record_id, "second, later")
+    notary.re_evaluate(record_id)
+
+    rec = notary.get_record(record_id)
+    assert rec["revision"] == 2, "the cooldown is a delay, not a cap"
+    assert rec["pending_reevaluation"] is False
+
+
+def test_a_refused_reevaluation_does_not_burn_the_challenge(direct_deploy, direct_vm):
+    """Otherwise the cooldown would deadlock the record.
+
+    If a blocked attempt consumed the pending challenge, the challenger would have
+    to post another one to get anywhere, and the escrow would sit un-re-evaluable
+    while looking challenged.
+    """
+    mock_all_confirmed(direct_vm)
+    notary = direct_deploy(CONTRACT)
+    record_id = notary.notarize("api_data", "version 2.4.0 was published", SOURCES)
+    notary.challenge(record_id, "first")
+    notary.re_evaluate(record_id)
+
+    notary.challenge(record_id, "second, too soon")
+    with pytest.raises(Exception):
+        notary.re_evaluate(record_id)
+
+    rec = notary.get_record(record_id)
+    assert rec["pending_reevaluation"] is True, (
+        "the challenge is still there, so the round happens once the window opens"
+    )
+
+    _advance(direct_vm, 2)
+    notary.re_evaluate(record_id)
+    assert notary.get_record(record_id)["revision"] == 2

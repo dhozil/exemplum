@@ -494,11 +494,11 @@ GEN and asserts the payee's chain-layer balance actually moves.
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
 contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
-tests/test_ai_notary.py                      84 direct-mode cases
+tests/test_ai_notary.py                      91 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
 tests/test_settlement.py                     92 direct-mode tests
 tests/integration/.                          39 tests against real GenVM
-frontend/.                                   React dApp for both contracts
+frontend/.                                   React dApp for both contracts (31 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
 
@@ -538,7 +538,7 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **185** direct-mode tests
+Current status: `genvm-lint` clean on both contracts, **190** direct-mode tests
 passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
 
 The `gltest` integration suite runs against StudioNet: 19 of 22 pass, the
@@ -572,10 +572,10 @@ GenLayer StudioNet, used by the frontend and the seeded demo data:
 
 | Contract | Address | Purpose |
 |---|---|---|
-| `AINotary` | `0x4e6323f5736E843F6e0F3fB02e6e0799F6712A97` | **demo** — curated records, what the frontend reads |
-| `NotarizedSettlement` | `0x613bCd2777F4feC561FDbb3CD0725bbB52Ce293b` | **demo** — 25 methods |
-| `AINotary` | `0x58b63dECd39caC2a3845d4ceE6af4082509D26d5` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0x9E00bF64d44B2A739b0B188b9D9C53D7EfaAAA10` | **test** | |
+| `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — curated records, what the frontend reads |
+| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods |
+| `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — target of the full method sweep |
+| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** | |
 
 Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint`
 exactly. The stale-verdict fix is proven against real GenVM by

@@ -3,6 +3,7 @@
 import json
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime
 from genlayer import *
 
 
@@ -60,6 +61,9 @@ def _as_address(value) -> Address:
 # so an unbounded ledger would be an unbounded storage-growth lever. Ten is
 # enough to cover any realistic dispute while keeping the field bounded.
 MAX_REVISION_EVIDENCE = 10
+# Minimum seconds between two re-evaluations of the same record. See
+# `re_evaluate` for why this is a rate limit rather than a slashed stake.
+REEVALUATION_COOLDOWN_SECONDS = 3600
 CONSENSUS_COUNT_TOLERANCE = 1
 DEFAULT_RPC_URL = "https://eth.llamarpc.com"
 
@@ -123,6 +127,11 @@ class Notarization:
     # a claim stays bound to the URL that was actually fetched and the content
     # that came back - rather than to a summary that drifts out of date.
     revision_evidence: str
+    # Appended last. When this record was last *re*-evaluated, empty until the
+    # first one. Distinct from `last_evaluated_at`, which is also set at
+    # creation - reusing it for the cooldown would block the first legitimate
+    # dispute of a freshly notarized record.
+    last_reevaluated_at: str
 
 
 def _clean_json(text: str) -> dict:
@@ -268,6 +277,22 @@ def _quote_is_verbatim(quote: str, content: str) -> bool:
 def _now_iso() -> str:
     """Chain-provided transaction time. Deterministic across all nodes."""
     return str(gl.message_raw["datetime"])
+
+
+def _seconds_between(later_iso: str, earlier_iso: str) -> int:
+    """Whole seconds from `earlier_iso` to `later_iso`, or -1 if unparseable.
+
+    Integer arithmetic only. `timedelta.total_seconds()` returns a float and
+    `int(seconds // 3600)` fails inside GenVM with a bare `execution failed`
+    and empty stderr, so no float division and no true division anywhere on this
+    path.
+    """
+    try:
+        later = datetime.fromisoformat(str(later_iso).replace("Z", "+00:00"))
+        earlier = datetime.fromisoformat(str(earlier_iso).replace("Z", "+00:00"))
+        return int((later - earlier).total_seconds())
+    except (ValueError, TypeError):
+        return -1
 
 
 def _fetch_web(source: str) -> str:
@@ -908,6 +933,8 @@ class AINotary(gl.Contract):
                 "",
                 _evidence_entry(0, now, agg, per_source),
             ),
+            # Never re-evaluated yet, so no cooldown applies.
+            last_reevaluated_at="",
         )
         self.tally[agg["verdict"]] = self.tally.get(agg["verdict"], 0) + 1
         return record_id
@@ -973,6 +1000,30 @@ class AINotary(gl.Contract):
                 f"{ERROR_EXPECTED} no unconsumed challenge on record {record_id}; "
                 "challenge it first"
             )
+        # Cooldown. Requiring a challenge is not enough on its own: a challenge
+        # is one transaction, and an attacker who wants to harass a settlement
+        # can buy challenges in a loop. Web fetches and LLM calls are flaky, so
+        # some rounds will come back unavailable or inconclusive, and a payee
+        # whose escrow is mid-settlement can be pushed into that state
+        # repeatedly by anyone who is willing to spend the gas.
+        #
+        # This bounds the rate rather than the total, which is the part that
+        # actually hurts: it does not stop the first re-evaluation, because that
+        # one is legitimate and may be right. It stops the pump.
+        #
+        # Deliberately not a slashed stake. A stake would mean escrow funds
+        # serving as collateral for someone else's dispute, which mixes custody
+        # into the trust list, and a forged stake is a new griefing surface of
+        # its own.
+        # Only between re-evaluations, so a fresh record can still be disputed
+        # immediately. An empty timestamp means "never re-evaluated".
+        if rec.last_reevaluated_at:
+            elapsed = _seconds_between(_now_iso(), rec.last_reevaluated_at)
+            if 0 <= elapsed < REEVALUATION_COOLDOWN_SECONDS:
+                raise gl.vm.UserError(
+                    f"{ERROR_EXPECTED} record {record_id} was re-evaluated {elapsed}s ago; "
+                    f"wait {REEVALUATION_COOLDOWN_SECONDS - elapsed}s"
+                )
         prepared = [str(s) for s in rec.sources]
         result = self._run_evaluation(rec.event_type, rec.claim, prepared)
         agg = result["aggregate"]
@@ -1008,6 +1059,8 @@ class AINotary(gl.Contract):
         self._bump_tally(agg["verdict"], 1)
         # The challenge that paid for this round is spent.
         rec.pending_reevaluation = False
+        # Starts the cooldown for the next round.
+        rec.last_reevaluated_at = rec.last_evaluated_at
         return agg["verdict"]
 
     @gl.public.write

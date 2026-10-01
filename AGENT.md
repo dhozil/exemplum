@@ -150,9 +150,33 @@ python -m pytest tests/ -q --ignore=tests/integration
 genvm-lint check contracts/ai_notary.py
 genvm-lint check contracts/notarized_settlement.py
 
+# frontend component and logic tests
+cd frontend && npm test
+
 # real GenVM
 gltest tests/integration/ -v --network studionet
 ```
+
+### Rendering a page in a test
+
+Setting up `RecordDetail` took several wrong turns, and the reasons are worth
+writing down because each looks like an application bug rather than a test one:
+
+- The page reads `useParams().id`, so the route must be `/records/:id`. A
+  mismatched param name renders the "not a record number" state and every
+  assertion fails with a message that points nowhere near the cause.
+- `useToast` needs `ToastProvider`. Rendering without it throws.
+- `useReveal` needs `IntersectionObserver`; jsdom has neither it nor
+  `ResizeObserver`. Polyfilled in `src/test/setup.ts`.
+- Mocking `useTx` with only `submit`/`busy`/`reset` is not enough — the page
+  reads `state.phase` to decide whether to draw the status panel. Return the
+  whole `TxState` shape.
+- `tsc -b` type-checks test files, so a mock object needs its properties
+  declared, not just assigned.
+- When an assertion cannot find something, **print the rendered DOM** and read
+  it. Four of my first assertions were wrong about the real copy, and one test
+  file had drifted far enough that its filename and its subject were different
+  pages.
 
 - `tests/integration/test_value_transfer.py` is **skipped by design**: this
   `gltest` build cannot send value, because `contract_function_factory` only
@@ -224,8 +248,10 @@ Each of these was verified on StudioNet. Re-verify before relying on it.
 Not oversights. Do not "fix" them without deciding the trust model first.
 
 - **Re-challenging is still free.** A verdict can still be flipped by anyone
-  willing to spend one traceable challenge. Closing that needs a stake that is
-  slashed when the verdict does not change.
+  willing to spend one traceable challenge. The cooldown bounds the *rate*; it
+  does not make the first re-evaluation cost anything, because that one may be
+  legitimate and may even be right. Closing it needs a stake that is slashed
+  when the verdict does not change.
 - **`reasoning` is not verified** and cannot be without circularity. It decides
   nothing and is labelled as narration everywhere it appears.
 - **The escrow's sources are chosen by the payer.** The truth of a settlement is
