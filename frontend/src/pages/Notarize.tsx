@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { NOTARY, notarize } from '../lib/api';
+import { NOTARY, getRecord, getStats, notarize } from '../lib/api';
 import { useTx } from '../lib/useTx';
 import { isUrl } from '../lib/format';
 import { ErrorNotice } from '../components/Primitives';
@@ -8,6 +8,8 @@ import { SourceEditor } from '../components/SourceEditor';
 import { TxStatusPanel } from '../components/Tx';
 import { useToast } from '../components/Toast';
 import { useAccount, signer } from '../lib/wallet';
+import { EquivalenceOutput } from '../components/EquivalenceOutput';
+import type { NotarizationRecord } from '../lib/types';
 
 const MIN_SOURCES = 2;
 const MAX_SOURCES = 5;
@@ -36,6 +38,26 @@ export default function Notarize() {
   const toast = useToast();
   const account = useAccount();
   const canWrite = account.address !== null;
+
+  /* The record this notarization produced, so the committee's reasoning can be
+     read straight away. A successful transaction only says the contract ran; it
+     says nothing about why it concluded what it concluded, and sending someone to
+     a list to hunt for the new record is exactly the gap that made the output
+     feel unreachable in the first place. */
+  const [fresh, setFresh] = useState<NotarizationRecord | null>(null);
+  const [freshLookup, setFreshLookup] = useState('');
+
+  async function showFreshRecord() {
+    try {
+      const stats = await getStats();
+      const id = stats.total - 1;
+      setFreshLookup(`record #${id}`);
+      setFresh(await getRecord(id));
+    } catch (err) {
+      setFreshLookup(String(err instanceof Error ? err.message : err));
+      setFresh(null);
+    }
+  }
 
   const distinct = new Set(sources.map((s) => s.trim()).filter(Boolean));
   const canSubmit =
@@ -86,6 +108,9 @@ export default function Notarize() {
         setSources(['', '']);
         setTouched(false);
         setErrors({ sources: {} });
+        // Look the new record up before the form is cleared, so the reasoning is
+        // on screen while the transaction that produced it is still being read.
+        void showFreshRecord();
         reset();
       },
     });
@@ -195,6 +220,33 @@ export default function Notarize() {
                 {state.phase === 'finalized' && state.executed && (
                   <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
                     Written by <code>{NOTARY}</code>
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* The committee's own account of the decision, here rather than one
+                click away. "The transaction succeeded" and "here is what the
+                validators concluded and why" are different pieces of information,
+                and only the first was being shown. */}
+            {(fresh || freshLookup) && state.phase === 'finalized' && (
+              <div style={{ marginTop: 'var(--s-5)' }}>
+                {fresh ? (
+                  <>
+                    <EquivalenceOutput
+                      record={fresh}
+                      heading={`What the committee concluded — ${freshLookup}`}
+                    />
+                    <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
+                      <Link to={`/records/${fresh.record_id}`}>Open the full record</Link> for the evidence
+                      ledger, challenges, and re-evaluation.
+                    </p>
+                  </>
+                ) : (
+                  <p className="hash">
+                    The record is on chain but could not be read back yet ({freshLookup}). StudioNet may
+                    still be indexing it — open{' '}
+                    <Link to="/records">the record list</Link> in a moment.
                   </p>
                 )}
               </div>

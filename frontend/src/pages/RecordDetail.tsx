@@ -6,6 +6,7 @@ import { useTx } from '../lib/useTx';
 import { signer, useAccount } from '../lib/wallet';
 import { cooldownEnd, formatDateTime, pluralise, relativeTo } from '../lib/format';
 import { parseRevisionLedger, type NotarizationRecord } from '../lib/types';
+import { EquivalenceOutput } from '../components/EquivalenceOutput';
 import { TheSeal } from '../components/TheSeal';
 import { Reveal } from '../components/Reveal';
 import {
@@ -232,6 +233,14 @@ function RecordBody({ record }: { record: NotarizationRecord }) {
         </div>
       )}
 
+      {/* ------------------------------------------------ equivalence output */}
+      {/* Was one row of a key/value list between "challenges" and "content hashes",
+          which is to say it was there and nobody could find it. Someone asking why
+          a record came out the way it did should not have to guess where to look. */}
+      <Reveal>
+        <EquivalenceOutput record={record} />
+      </Reveal>
+
       {/* ---------------------------------------------------------- evidence */}
       <div className="section">
         <div className="section__eyebrow">
@@ -285,7 +294,6 @@ function RecordBody({ record }: { record: NotarizationRecord }) {
                 ],
                 ['revisions', String(record.revision)],
                 ['challenges', String(record.challenge_count)],
-                ['reasoning', <span className="hash">{record.reasoning || '—'}</span>],
               ]}
             />
 
