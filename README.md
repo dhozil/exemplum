@@ -515,15 +515,25 @@ GEN and asserts the payee's chain-layer balance actually moves.
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
 contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
-tests/test_ai_notary.py                      91 direct-mode cases
+tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     94 direct-mode tests
+tests/test_settlement.py                     96 direct-mode tests
 tests/integration/.                          39 tests against real GenVM
-frontend/.                                   React dApp for both contracts (31 component/logic tests)
+frontend/.                                   React dApp for both contracts (105 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
 
 ```
+
+---
+
+## Deploy the frontend
+
+It is a Vite SPA and needs no secrets. Import the repository on Vercel, set the
+root directory to `frontend`, and deploy — with no environment variables at all it
+points at this project's own StudioNet pair and works. **[DEPLOYMENT.md](DEPLOYMENT.md)**
+covers the settings, the optional variables, and the two things that break if they
+are missing (deep links and the Node version).
 
 ---
 

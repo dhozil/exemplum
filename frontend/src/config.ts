@@ -51,11 +51,21 @@ export const CURRENCY_SYMBOL = chain.nativeCurrency.symbol;
 /** Zero address: the deployment has not been configured yet. */
 export const ZERO = '0x0000000000000000000000000000000000000000';
 
+/*
+ * Defaulting to the zero address made every deployment need three environment
+ * variables before it showed anything, which turns "import the repo and deploy"
+ * into a broken site with an empty address and a notice nobody reads. These are
+ * the project's own public StudioNet addresses — the same pair `.env.example`
+ * documents — so a fresh deploy works and a real deployment overrides them.
+ *
+ * Point them at your own pair by setting VITE_NOTARY_ADDRESS and
+ * VITE_SETTLEMENT_ADDRESS in the Vercel project's environment variables.
+ */
 export const NOTARY_ADDRESS = (env('VITE_NOTARY_ADDRESS') ??
-  '0x0000000000000000000000000000000000000000') as `0x${string}`;
+  '0x6541E1eEa84d012ad6D5FB7393D8161b504071f3') as `0x${string}`;
 
 export const SETTLEMENT_ADDRESS = (env('VITE_SETTLEMENT_ADDRESS') ??
-  '0x0000000000000000000000000000000000000000') as `0x${string}`;
+  '0xf1C2338f354384da7ff1eD739201Af6BC8BD4653') as `0x${string}`;
 
 export function explorerTx(hash: string): string {
   return `${EXPLORER_URL}/tx/${hash}`;
