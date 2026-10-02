@@ -27,8 +27,22 @@ export const chain = chains[NETWORK];
 
 export const RPC_URL = env('VITE_GENLAYER_RPC') ?? chain.rpcUrls.default.http[0];
 
-export const EXPLORER_URL =
-  env('VITE_GENLAYER_EXPLORER') ?? chain.blockExplorers?.default?.url ?? '';
+/**
+ * Where to send someone who wants to look a transaction up.
+ *
+ * The SDK's own `studionet` explorer entry is `https://genlayer-explorer.vercel.app`,
+ * which answers 503 on every path — three attempts, consistently. Falling back to
+ * it produced links that are dead on arrival while looking correct, so the URL is
+ * set explicitly in the environment instead, and the SDK value is not used as a
+ * default. Verified working: `https://explorer-studio.genlayer.com`, which serves
+ * `/address/<addr>` and `/tx/<hash>` and 404s a path that is not a lookup, so it
+ * is a real explorer rather than a single-page app answering everything.
+ *
+ * Trailing slashes are stripped so the `/tx/` joins below cannot produce `//tx/`.
+ */
+export const EXPLORER_URL = (
+  env('VITE_GENLAYER_EXPLORER') ?? 'https://explorer-studio.genlayer.com'
+).replace(/\/+$/, '');
 
 export const CHAIN_NAME = chain.name;
 
