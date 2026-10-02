@@ -8,7 +8,7 @@
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
 [![Methods](https://img.shields.io/badge/on--chain%20methods-37-7E14FF?style=flat-square)](#api)
-[![Tests](https://img.shields.io/badge/tests-344-2E7D32?style=flat-square)](#verify)
+[![Tests](https://img.shields.io/badge/tests-349-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
 [Live deployment](#deploy-the-frontend) · [How it works](#how-it-works) · [API](#api) · [Limitations](#known-limitations) · [Deploy it yourself](#deploy)
@@ -613,7 +613,7 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 |---|---|---|
 | Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
-| Frontend (`vitest`) | **105** | 10 files |
+| Frontend (`vitest`) | **110** | 11 files |
 | On-chain methods | **37** | 12 notary + 25 settlement, checked against the deployed schema |
 
 `genvm-lint` is clean on both contracts, and every one of the 37 on-chain methods

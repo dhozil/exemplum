@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { NOTARY, getRecord, getStats, notarize } from '../lib/api';
 import { useTx } from '../lib/useTx';
 import { isUrl } from '../lib/format';
@@ -8,8 +8,6 @@ import { SourceEditor } from '../components/SourceEditor';
 import { TxStatusPanel } from '../components/Tx';
 import { useToast } from '../components/Toast';
 import { useAccount, signer } from '../lib/wallet';
-import { EquivalenceOutput } from '../components/EquivalenceOutput';
-import type { NotarizationRecord } from '../lib/types';
 
 const MIN_SOURCES = 2;
 const MAX_SOURCES = 5;
@@ -28,6 +26,7 @@ interface Errors {
 }
 
 export default function Notarize() {
+  const navigate = useNavigate();
   const [eventType, setEventType] = useState<string>('api_data');
   const [claim, setClaim] = useState('');
   const [sources, setSources] = useState<string[]>(['', '']);
@@ -39,23 +38,25 @@ export default function Notarize() {
   const account = useAccount();
   const canWrite = account.address !== null;
 
-  /* The record this notarization produced, so the committee's reasoning can be
-     read straight away. A successful transaction only says the contract ran; it
-     says nothing about why it concluded what it concluded, and sending someone to
-     a list to hunt for the new record is exactly the gap that made the output
-     feel unreachable in the first place. */
-  const [fresh, setFresh] = useState<NotarizationRecord | null>(null);
-  const [freshLookup, setFreshLookup] = useState('');
+  /* Where the newly created record ended up.
+     A notarization does not return its own id, so the ledger length is the way
+     in: the record just written is the last one. */
+  const [redirectError, setRedirectError] = useState('');
 
-  async function showFreshRecord() {
+  async function goToFreshRecord() {
     try {
       const stats = await getStats();
       const id = stats.total - 1;
-      setFreshLookup(`record #${id}`);
-      setFresh(await getRecord(id));
+      if (id < 0) throw new Error('The ledger reported no records.');
+      const record = await getRecord(id);
+      if (!record || record.record_id === undefined) {
+        throw new Error(`record #${id} is not readable yet`);
+      }
+      navigate(`/records/${record.record_id}`);
     } catch (err) {
-      setFreshLookup(String(err instanceof Error ? err.message : err));
-      setFresh(null);
+      // Navigating to a record that will not load would land on an empty page,
+      // which is worse than staying put and saying so.
+      setRedirectError(String(err instanceof Error ? err.message : err));
     }
   }
 
@@ -108,10 +109,12 @@ export default function Notarize() {
         setSources(['', '']);
         setTouched(false);
         setErrors({ sources: {} });
-        // Look the new record up before the form is cleared, so the reasoning is
-        // on screen while the transaction that produced it is still being read.
-        void showFreshRecord();
+        setRedirectError('');
+        // Reset first, then navigate. Leaving the phase at `finalized` kept a
+        // success banner on screen for the page being left anyway, and any
+        // view conditioned on it rendered nothing once the form cleared.
         reset();
+        void goToFreshRecord();
       },
     });
   }
@@ -225,32 +228,16 @@ export default function Notarize() {
               </div>
             )}
 
-            {/* The committee's own account of the decision, here rather than one
-                click away. "The transaction succeeded" and "here is what the
-                validators concluded and why" are different pieces of information,
-                and only the first was being shown. */}
-            {(fresh || freshLookup) && state.phase === 'finalized' && (
-              <div style={{ marginTop: 'var(--s-5)' }}>
-                {fresh ? (
-                  <>
-                    <EquivalenceOutput
-                      record={fresh}
-                      heading={`What the committee concluded — ${freshLookup}`}
-                    />
-                    <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
-                      <Link to={`/records/${fresh.record_id}`}>Open the full record</Link> for the evidence
-                      ledger, challenges, and re-evaluation.
-                    </p>
-                  </>
-                ) : (
-                  <p className="hash">
-                    The record is on chain but could not be read back yet ({freshLookup}). StudioNet may
-                    still be indexing it — open{' '}
-                    <Link to="/records">the record list</Link> in a moment.
-                  </p>
-                )}
-              </div>
-            )}
+{/* Only reached when the lookup for the new record failed — a
+                successful notarization navigates to the record itself. Saying why
+                is the difference between "it did nothing" and "try again". */}
+            {redirectError && (
+              <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
+                The record was written, but it could not be opened just now ({redirectError}).{' '}
+                <Link to="/records">Open the record list</Link> and try again in a moment — StudioNet
+                may still be indexing it.
+              </p>
+)}
 
             {state.phase === 'error' && state.error && (
               <div style={{ marginTop: 'var(--s-5)' }}>
