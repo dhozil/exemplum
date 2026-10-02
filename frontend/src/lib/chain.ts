@@ -261,11 +261,24 @@ export async function connectWallet(id?: WalletId): Promise<string> {
 
   if (!(await isOnGenLayerNetwork())) await switchToGenLayerNetwork();
 
-  // The write path reads this when it has no account of its own. The SDK only
-  // ever assigns it from `createClient({ account })`, which cannot be known
-  // before the user picks a wallet.
-  (client as unknown as { account: string }).account = accounts[0];
+  // The write path reads `senderAccount.address` on this when it has no account
+  // of its own. It has to be an object: given a bare string, `.address` is
+  // undefined and the failure arrives later as a viem checksum complaint.
+  (client as unknown as { account: { address: string } }).account = { address: accounts[0] };
   return accounts[0];
+}
+
+/**
+ * Put a restored address back on the client.
+ *
+ * `client.account` is only assigned during an interactive connect, but the
+ * session is restored from localStorage on load. Without this a page reload
+ * leaves the header showing a connected account — so the write button is enabled
+ * — while the client holds no account, and the first submit fails with an error
+ * about an address nobody typed.
+ */
+export function restoreClientAccount(address: string): void {
+  (client as unknown as { account: { address: string } }).account = { address };
 }
 
 /** Re-read the chain and accounts after the wallet changes either. */

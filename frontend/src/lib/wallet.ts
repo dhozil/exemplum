@@ -20,6 +20,7 @@ import {
   connectWallet,
   getActiveWallet,
   getAvailableWallets,
+  restoreClientAccount,
   type WalletId,
 } from './chain';
 import { describeError, type FriendlyError } from './errors';
@@ -94,6 +95,13 @@ function restore(): AccountState | null {
 
     const parsed = JSON.parse(raw) as { address?: string; kind?: AccountKind; label?: string };
     if (!parsed.address) return null;
+
+    // A restored session has to be handed back to the client too. `client.account`
+    // is only assigned during an interactive connect, so after a reload the header
+    // shows a connected account — write button enabled — while the client holds
+    // none, and the first submit fails complaining about an address nobody typed.
+    if (parsed.kind !== 'development') restoreClientAccount(parsed.address);
+
     return {
       address: parsed.address,
       kind: parsed.kind ?? null,
@@ -222,10 +230,20 @@ export function getAccount(): AccountState {
   return current;
 }
 
-/** The signer to pass to a write, or undefined when nothing is connected. */
+/**
+ * The signer to pass to a write, or undefined when nothing is connected.
+ *
+ * For a wallet connection this is `{ address }`, not a bare address string.
+ * `genlayer-js` reads `senderAccount.address` on whatever it is handed: given a
+ * string, `.address` is `undefined`, and the failure surfaces far away as
+ * `Address "undefined" is invalid ... Version: viem@2.56.9` — a checksum error
+ * about a checksum, pointing at nothing the user typed. A development account is
+ * already an object and is passed through.
+ */
 export async function signer(): Promise<unknown | undefined> {
   if (current.kind === 'development') return developmentAccount() ?? undefined;
-  return current.address as unknown as undefined;
+  if (!current.address) return undefined;
+  return { address: current.address };
 }
 
 export function useAccount(): AccountState {
