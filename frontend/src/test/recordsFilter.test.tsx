@@ -132,7 +132,7 @@ describe('scanRecords', () => {
     expect(r.rows).toHaveLength(120);
     expect(r.truncated).toBe(false);
     expect(pageCalls().length).toBeGreaterThan(1);
-    for (const c of pageCalls()) expect(c[0].args[1]).toBeLessThanOrEqual(MAX_PAGE);
+    for (const c of pageCalls()) expect(c[0].args?.[1] as number).toBeLessThanOrEqual(MAX_PAGE);
   });
 
   /* A scan that stopped early must say so. Showing a partial list as though it
@@ -214,7 +214,7 @@ describe('Records: Mine filter', () => {
     await screen.findByText('claim number 1');
     // One call for the page, plus stats and the challenge log. A scan on load
     // would spend the node's request budget before anyone asks for a filter.
-    expect(pageCalls().every((c) => c[0].args[1] === 10)).toBe(true);
+    expect(pageCalls().every((c) => c[0].args?.[1] === 10)).toBe(true);
   });
 
   it('hides the pager when showing scanned results', async () => {
