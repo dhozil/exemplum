@@ -517,8 +517,8 @@ contracts/ai_notary.py                      12 methods  – attestation + consen
 contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     96 direct-mode tests
-tests/integration/.                          39 tests against real GenVM
+tests/test_settlement.py                     97 direct-mode tests
+tests/integration/.                          40 tests against real GenVM
 frontend/.                                   React dApp for both contracts (105 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
