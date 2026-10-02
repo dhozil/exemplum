@@ -14,11 +14,13 @@
  */
 
 import { useEffect, useState } from 'react';
+
 import {
+  clearWalletSelection,
   connectWallet,
-  describeProvider,
-  injectedProviders,
-  setChosenProvider,
+  getActiveWallet,
+  getAvailableWallets,
+  type WalletId,
 } from './chain';
 import { describeError, type FriendlyError } from './errors';
 
@@ -142,26 +144,32 @@ async function developmentAccount(): Promise<unknown | null> {
  * for reasons documented there: `connect()` never requests an account, and it
  * reads `window.ethereum` rather than the chosen wallet.
  */
-export async function connectViaSnap(provider?: unknown): Promise<void> {
+/**
+ * Connect through a wallet the user picked, or the only one installed.
+ *
+ * The work is `connectWallet` in chain.ts rather than the SDK's own connect: that
+ * one requires the GenLayer Snap, which only exists in MetaMask, and it never
+ * requests an account. Both are documented there.
+ */
+export async function connectViaSnap(id?: WalletId): Promise<void> {
   publish({ ...INITIAL, connecting: true });
-  const wallet = (provider as Parameters<typeof connectWallet>[0] | undefined) ?? injectedProviders()[0];
-  if (!wallet) {
-    publish({
-      ...INITIAL,
-      error: {
-        title: 'No browser wallet found',
-        detail:
-          'Install MetaMask, or use the development account. This page talks to a wallet extension directly; there is nothing to connect to without one.',
-        tone: 'warn',
-        retryable: false,
-      },
-    });
-    return;
-  }
   try {
-    setChosenProvider(wallet);
-    const address = await connectWallet(wallet);
-    const label = describeProvider(wallet);
+    const walletId = id ?? getAvailableWallets()[0]?.id;
+    if (!walletId) {
+      publish({
+        ...INITIAL,
+        error: {
+          title: 'No browser wallet found',
+          detail:
+            'Install MetaMask or Rabby to connect. This page signs transactions with a wallet extension; there is nothing to connect to without one.',
+          tone: 'warn',
+          retryable: false,
+        },
+      });
+      return;
+    }
+    const address = await connectWallet(walletId);
+    const label = getActiveWallet() === 'metamask' ? 'MetaMask' : 'Rabby';
     const next: AccountState = { address, kind: 'snap', label, connecting: false, error: null };
     persist(address, 'snap', label);
     publish(next);
@@ -169,7 +177,6 @@ export async function connectViaSnap(provider?: unknown): Promise<void> {
     publish({ ...INITIAL, error: describeError(err) });
   }
 }
-
 export async function connectDevelopment(): Promise<void> {
   publish({ ...INITIAL, connecting: true });
   try {
@@ -207,7 +214,7 @@ export async function connectDevelopment(): Promise<void> {
 
 export function disconnect(): void {
   persist(null, null, null);
-  setChosenProvider(null);
+  clearWalletSelection();
   publish({ ...INITIAL });
 }
 

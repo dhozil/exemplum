@@ -6,42 +6,9 @@ import {
   hasDevelopmentAccount,
   useAccount,
 } from '../lib/wallet';
-import { describeProvider, injectedProviders } from '../lib/chain';
+import { discoverWalletProviders, getAvailableWallets, type WalletOption } from '../lib/chain';
 import type { FriendlyError } from '../lib/errors';
 import { shortAddress } from '../lib/format';
-
-/** Whether a wallet looks like it can install the Snap, read from its own flags. */
-function isMetaMaskLike(provider: unknown): boolean {
-  const p = provider as { isMetaMask?: boolean };
-  return Boolean(p?.isMetaMask);
-}
-
-/**
- * The connect failure, shown next to the button that caused it.
- *
- * This was rendering nowhere. `connectViaSnap` publishes a friendly error into
- * the store, and the button just reverts to "Connect account" — so a connect that
- * failed looked identical to a connect that was never attempted. Worse, the
- * common failure is the Snap not being installed, which needs the user to act
- * inside MetaMask, and the only way to tell them that is to say it.
- *
- * `role="alert"` because it arrives as the direct result of a click: it is the
- * answer to that action, and a screen reader should announce it without having to
- * go looking for it.
- */
-function AccountError({ error }: { error: FriendlyError | null }) {
-  if (!error) return null;
-  return (
-    <div
-      className={`notice notice--${error.tone === 'info' ? 'info' : error.tone}`}
-      role="alert"
-      style={{ maxWidth: '22rem', marginTop: 'var(--s-2)' }}
-    >
-      <p className="notice__title">{error.title}</p>
-      {error.detail && <p className="notice__body">{error.detail}</p>}
-    </div>
-  );
-}
 
 /**
  * Account control.
@@ -51,51 +18,27 @@ function AccountError({ error }: { error: FriendlyError | null }) {
  * spelled out — a development key is not a wallet signature, and pretending
  * otherwise would be the wrong kind of clever.
  *
- * Picking a wallet is a deliberate step rather than a race. `genlayer-js` reads
- * `window.ethereum` directly and never consults EIP-6963, so with more than one
- * extension installed the browser hands it whichever registered first and the
- * user has no way to reach the other. When there is a choice to make, this asks.
+ * Choosing a wallet is a step, not a race. `genlayer-js` reads `window.ethereum`
+ * directly and never consults EIP-6963, so with two extensions installed the
+ * browser hands it whichever registered first and the other is unreachable.
+ * Providers are discovered by announcement, so a wallet that injects after first
+ * paint still appears.
  */
 export function AccountControl() {
   const account = useAccount();
   const [open, setOpen] = useState(false);
-  const [wallets, setWallets] = useState<{ uid: string; name: string; provider: unknown; isSnapLikely: boolean }[]>([]);
+  const [wallets, setWallets] = useState<WalletOption[]>([]);
   const root = useRef<HTMLDivElement>(null);
 
-  /* Read on demand rather than from a render-time snapshot. Extensions inject
-     asynchronously after first paint, so a snapshot taken during the first render
-     can be empty and would hide the picker for the rest of the session — the same
-     silent-default bug, in a slower form. */
-  function readWallets() {
-    return injectedProviders().map((p, i) => ({
-      uid: `${describeProvider(p)}-${i}`,
-      name: describeProvider(p),
-      provider: p,
-      isSnapLikely: isMetaMaskLike(p),
-    }));
-  }
+  useEffect(() => discoverWalletProviders(setWallets), []);
 
-  function startConnect() {
-    const found = readWallets();
-    if (found.length > 1) {
-      setWallets(found);
-      setOpen(true);
-      return;
-    }
-    void connectViaSnap(found[0]?.provider);
-  }
-
-  /* Click outside, Escape, and a pending drawer has to close on scroll.
+  /* Click outside, Escape, and close on scroll.
      This is the part jsdom cannot test: a `position: fixed; inset: 0` backdrop
      placed inside the sticky header (`z-index: 20`) covers the whole viewport,
      and being in the header's stacking context it also covers the Connect button
      itself — so the second click lands on the backdrop and the drawer appears
-     dead. jsdom has no layout, so the test suite was green against a control that
-     does not respond in a browser.
-
-     Closing on scroll matters for the same reason: the drawer is anchored to a
-     sticky header, and scrolling with it open leaves the list pointing at
-     something that has moved. */
+     dead. jsdom has no layout, so the suite was green against a control that does
+     not respond in a browser. */
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: MouseEvent) => {
@@ -116,7 +59,6 @@ export function AccountControl() {
   if (account.address) {
     return (
       <div className="cluster cluster--tight" style={{ position: 'relative' }} ref={root}>
-        <AccountError error={account.error} />
         <button
           type="button"
           className="btn btn--ghost btn--sm"
@@ -143,7 +85,7 @@ export function AccountControl() {
             }}
           >
             <p className="label" style={{ marginBottom: 'var(--s-2)' }}>
-              {account.kind === 'development' ? 'Development account' : account.label ?? 'Connected account'}
+              {account.kind === 'development' ? 'Development account' : (account.label ?? 'Connected account')}
             </p>
             <p className="hash" style={{ wordBreak: 'break-all', marginTop: 0 }}>
               {account.address}
@@ -179,7 +121,21 @@ export function AccountControl() {
       <button
         type="button"
         className="btn btn--ghost btn--sm"
-        onClick={() => (hasChoice && open ? setOpen(false) : startConnect())}
+        onClick={() => {
+          if (hasChoice && open) {
+            setOpen(false);
+            return;
+          }
+          // Re-read on click: a wallet may have injected since the last render,
+          // and a snapshot taken during render would hide it for the session.
+          const found = getAvailableWallets();
+          if (found.length > 1) {
+            setWallets(found);
+            setOpen(true);
+            return;
+          }
+          void connectViaSnap(found[0]?.id);
+        }}
         disabled={account.connecting}
         aria-haspopup={hasChoice ? 'menu' : undefined}
         aria-expanded={hasChoice ? open : undefined}
@@ -222,25 +178,45 @@ export function AccountControl() {
           </p>
           {wallets.map((w) => (
             <button
-              key={w.uid}
+              key={w.id}
               type="button"
               role="menuitem"
               className="btn btn--ghost btn--sm"
               style={{ width: '100%', justifyContent: 'space-between' }}
               onClick={() => {
                 setOpen(false);
-                void connectViaSnap(w.provider);
+                void connectViaSnap(w.id);
               }}
             >
               <span>{w.name}</span>
-              {w.isSnapLikely && <span className="hash">Snap supported</span>}
             </button>
           ))}
-          <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
-            The GenLayer Snap lives in MetaMask. Other wallets can hold and show your address.
-          </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The connect failure, shown next to the button that caused it.
+ *
+ * This was rendering nowhere. `connectViaSnap` publishes a friendly error into the
+ * store and the button just reverts to "Connect account", so a connect that failed
+ * looked identical to one that was never attempted.
+ *
+ * `role="alert"` because it arrives as the direct result of a click: it is the
+ * answer to that action.
+ */
+function AccountError({ error }: { error: FriendlyError | null }) {
+  if (!error) return null;
+  return (
+    <div
+      className={`notice notice--${error.tone === 'info' ? 'info' : error.tone}`}
+      role="alert"
+      style={{ maxWidth: '22rem', marginTop: 'var(--s-2)' }}
+    >
+      <p className="notice__title">{error.title}</p>
+      {error.detail && <p className="notice__body">{error.detail}</p>}
     </div>
   );
 }

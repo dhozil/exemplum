@@ -1,190 +1,264 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 
-import { connectWallet, injectedProviders, describeProvider, SNAP_ID } from '../lib/chain';
-
-type Provider = { request: (a: { method: string; params?: unknown[] | Record<string, unknown> }) => Promise<unknown> };
-import { client } from '../lib/chain';
+import {
+  clearWalletSelection,
+  connectWallet,
+  discoverWalletProviders,
+  getAvailableWallets,
+  isOnGenLayerNetwork,
+} from '../lib/chain';
 
 /**
- * Connecting a wallet, without going through the SDK's `connect`.
+ * Connecting without requiring the GenLayer Snap.
  *
- * `genlayer-js`'s `client.connect()` was unusable on its own: it checks
- * `window.ethereum`, switches chain, installs the Snap, sets `client.chain` —
- * and never requests an account. So `client.account` stayed undefined and every
- * connect ended at "No account address was returned" with no account shown. It
- * also read the global instead of the wallet the user chose, which is the
- * injection race this whole change exists to remove.
+ * The Snap is the thing that made this app unusable for anyone whose wallet was
+ * not MetaMask: it only exists there, and the connect path insisted on installing
+ * it, so a Rabby user got a refusal to connect at all rather than a working app.
+ * Nothing about a write needs it — `client.writeContract` issues
+ * `eth_sendTransaction`, an ordinary EIP-1193 method every wallet has.
  *
- * The earlier workaround for that — rebinding `window.ethereum` — then threw
- * `Cannot set property ethereum of #<Window> which has only a getter` on wallets
- * that expose it as a getter. So these tests pin the behaviour that survives
- * without a rebind: the chosen provider is the one asked, and an address comes
- * back.
+ * Modelled on stratasure's `frontend/lib/genlayer/client.ts`: same genlayer-js
+ * version, same Studionet target, and it works with both wallets.
  */
 
-type Request = { method: string; params?: unknown[] | Record<string, unknown> };
+type Request = { method: string; params?: unknown[] };
+type Provider = { request: (r: Request) => Promise<unknown> };
 
-function wallet(behaviour: (r: Request) => unknown, extra: Record<string, unknown> = {}) {
-  return { request: vi.fn((r: Request) => Promise.resolve(behaviour(r))), ...extra } as unknown as Provider;
+const CHAIN_ID = 61999;
+const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
+const ADDRESS = '0x' + '11'.repeat(20);
+
+let snapshot: unknown;
+
+interface FakeWallet extends Provider {
+  isMetaMask?: boolean;
+  isRabby?: boolean;
+  /** RPC methods this wallet was asked for, in order. */
+  asked: string[];
 }
 
-const CHAIN_ID = '0x' + (3199).toString(16);
-
-function snapInstalled(): (r: Request) => unknown {
-  return (r) => {
-    switch (r.method) {
-      case 'eth_chainId':
-        return CHAIN_ID;
-      case 'wallet_getSnaps':
-        return { 'npm:genlayer-wallet-plugin': { id: SNAP_ID } };
-      case 'eth_requestAccounts':
-        return ['0xabc0000000000000000000000000000000001234'];
-      default:
-        return null;
-    }
-  };
+/**
+ * `asked` is returned on the same object the closure pushes to, so it can be
+ * spread and given identity flags without going out of sync — an earlier version
+ * spread the helper and overwrote `asked` with a fresh array, which the closure
+ * never wrote to, so every assertion read empty.
+ */
+function wallet(
+  opts: { chainId?: string; accounts?: string[]; failOn?: string } = {},
+  flags: { isMetaMask?: boolean; isRabby?: boolean } = {},
+): FakeWallet {
+  const w: FakeWallet = {
+    asked: [],
+    isMetaMask: flags.isMetaMask,
+    isRabby: flags.isRabby,
+    request: vi.fn((r: Request) => {
+      w.asked.push(r.method);
+      if (opts.failOn === r.method) {
+        return Promise.reject(Object.assign(new Error('nope'), { code: 4001 }));
+      }
+      switch (r.method) {
+        case 'eth_chainId':
+          return Promise.resolve(opts.chainId ?? CHAIN_ID_HEX);
+        case 'eth_accounts':
+        case 'eth_requestAccounts':
+          return Promise.resolve(opts.accounts ?? [ADDRESS]);
+        default:
+          return Promise.resolve(null);
+      }
+    }),
+  } as FakeWallet;
+  return w;
 }
 
-describe('connectWallet', () => {
-  it('returns the address the wallet reports', async () => {
-    const address = await connectWallet(wallet(snapInstalled()));
-    expect(address).toBe('0xabc0000000000000000000000000000000001234');
+function install(providers: FakeWallet[]) {
+  (window as unknown as { ethereum?: unknown }).ethereum =
+    providers.length === 1 ? providers[0] : { request: providers[0].request, providers };
+}
+
+beforeEach(() => {
+  // The chosen wallet and the announced set are module state; without this a
+  // selection in one test decides the next one's outcome.
+  clearWalletSelection();
+  localStorage.clear();
+  snapshot = (window as unknown as { ethereum?: unknown }).ethereum;
+});
+
+afterEach(() => {
+  const w = window as unknown as { ethereum?: unknown };
+  if (snapshot === undefined) delete w.ethereum;
+  else w.ethereum = snapshot;
+});
+
+describe('discovery', () => {
+  it('finds a wallet through the legacy window.ethereum', () => {
+    install([wallet({}, { isRabby: true })]);
+    expect(getAvailableWallets().map((w) => w.id)).toEqual(['metamask', 'rabby'].filter((id) =>
+      (id === 'metamask') === Boolean((window as unknown as { ethereum: Record<string, unknown> }).ethereum.isMetaMask),
+    ));
   });
 
-  it('asks the provider it was given, so the chosen wallet is the one used', async () => {
-    const provider = wallet(snapInstalled());
-    await connectWallet(provider);
-    const methods = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls.map(
-      (c) => c[0].method,
+  it('lists both wallets when both are injected, in a fixed order', () => {
+    const mm = wallet({}, { isMetaMask: true });
+    const rb = wallet({}, { isRabby: true });
+    install([mm, rb]);
+    expect(getAvailableWallets().map((w) => w.id)).toEqual(['metamask', 'rabby']);
+  });
+
+  it('finds a wallet that only announced itself over EIP-6963', () => {
+    // No `ethereum` at all: the wallet speaks only the announcement protocol.
+    delete (window as unknown as { ethereum?: unknown }).ethereum;
+    const seen: number[] = [];
+    const cleanup = discoverWalletProviders((w) => seen.push(w.length));
+
+    window.dispatchEvent(
+      new CustomEvent('eip6963:announceProvider', {
+        detail: {
+          info: { uuid: 'u', name: 'Rabby', icon: '', rdns: 'io.rabby' },
+          provider: wallet(),
+        },
+      }),
     );
-    expect(methods).toContain('eth_requestAccounts');
+
+    expect(seen[seen.length - 1]).toBe(1);
+    expect(getAvailableWallets().map((w) => w.id)).toEqual(['rabby']);
+    cleanup();
   });
 
-  it('puts the address on the client, since the write path reads it from there', async () => {
-    await connectWallet(wallet(snapInstalled()));
-    expect((client as unknown as { account: string }).account).toBe(
-      '0xabc0000000000000000000000000000000001234',
+  it('asks wallets to announce, then stops listening when cleaned up', () => {
+    const seen: number[] = [];
+    const cleanup = discoverWalletProviders((w) => seen.push(w.length));
+    const before = seen.length;
+    cleanup();
+
+    window.dispatchEvent(
+      new CustomEvent('eip6963:announceProvider', {
+        detail: { info: { uuid: 'u', name: 'Rabby', icon: '', rdns: 'io.rabby' }, provider: wallet() },
+      }),
     );
+    expect(seen.length).toBe(before);
   });
 
-  it('does not write to window.ethereum, which some wallets expose as a getter', async () => {
-    // The failure this replaces: assigning window.ethereum throws
-    // "Cannot set property ethereum of #<Window> which has only a getter".
-    const descriptor = Object.getOwnPropertyDescriptor(window, 'ethereum');
-    const original = descriptor?.get;
-    let setterCalled = false;
-    Object.defineProperty(window, 'ethereum', {
-      configurable: true,
-      get: original ?? (() => undefined),
-      set: () => {
-        setterCalled = true;
-      },
-    });
-
-    try {
-      await connectWallet(wallet(snapInstalled()));
-      expect(setterCalled).toBe(false);
-    } finally {
-      if (descriptor) Object.defineProperty(window, 'ethereum', descriptor);
-      else delete (window as unknown as { ethereum?: unknown }).ethereum;
-    }
-  });
-
-  it('installs the Snap when it is missing', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'wallet_getSnaps') return {};
-      if (r.method === 'eth_chainId') return CHAIN_ID;
-      if (r.method === 'eth_requestAccounts') return ['0xdef'];
-      return null;
-    });
-    await connectWallet(provider);
-    const calls = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls;
-    const request = calls.find((c) => c[0].method === 'wallet_requestSnaps');
-    expect(request).toBeDefined();
-    expect(request![0].params).toEqual({ [SNAP_ID]: {} });
-  });
-
-  it('does not reinstall a Snap that is already there', async () => {
-    const provider = wallet(snapInstalled());
-    await connectWallet(provider);
-    const calls = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls;
-    expect(calls.find((c) => c[0].method === 'wallet_requestSnaps')).toBeUndefined();
-  });
-
-  it('switches chain before asking for an account', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'eth_chainId') return '0x1';
-      if (r.method === 'wallet_getSnaps') return { 'npm:genlayer-wallet-plugin': { id: SNAP_ID } };
-      if (r.method === 'eth_requestAccounts') return ['0xdef'];
-      return null;
-    });
-    await connectWallet(provider);
-    const methods = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls.map(
-      (c) => c[0].method,
-    );
-    expect(methods).toContain('wallet_switchEthereumChain');
-    expect(methods.indexOf('wallet_switchEthereumChain')).toBeLessThan(
-      methods.indexOf('eth_requestAccounts'),
-    );
-  });
-
-  it('says which wallet cannot hold a Snap, rather than blaming MetaMask', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'eth_chainId') return CHAIN_ID;
-      if (r.method === 'wallet_getSnaps') throw new Error('Method not found');
-      return null;
-    }, { isRabby: true });
-
-    await expect(connectWallet(provider)).rejects.toThrow(/rabby/i);
-    await expect(connectWallet(provider)).rejects.toThrow(/snap/i);
-  });
-
-  it('does not say "MetaMask is not installed" when MetaMask is installed', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'eth_chainId') return CHAIN_ID;
-      if (r.method === 'wallet_getSnaps') throw new Error('Method not found');
-      return null;
-    }, { isMetaMask: true });
-
-    // The SDK's wording sends the user looking for a missing browser extension
-    // when the real gap is only the Snap inside an installed MetaMask.
-    await expect(connectWallet(provider)).rejects.not.toThrow(/MetaMask is not installed/i);
-  });
-
-  it('treats a declined Snap install as a decline, not a fault', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'eth_chainId') return CHAIN_ID;
-      if (r.method === 'wallet_getSnaps') return {};
-      if (r.method === 'wallet_requestSnaps') throw new Error('User rejected the request.');
-      return null;
-    }, { isMetaMask: true });
-
-    await expect(connectWallet(provider)).rejects.toThrow(/declined/i);
-  });
-
-  it('explains an empty account list rather than reporting no address', async () => {
-    const provider = wallet((r) => {
-      if (r.method === 'eth_chainId') return CHAIN_ID;
-      if (r.method === 'wallet_getSnaps') return { 'npm:genlayer-wallet-plugin': { id: SNAP_ID } };
-      if (r.method === 'eth_requestAccounts') return [];
-      return null;
-    }, { isMetaMask: true });
-
-    await expect(connectWallet(provider)).rejects.toThrow(/no account/i);
+  it('does not list the same wallet twice when a wallet pushes it repeatedly', () => {
+    const mm = wallet({}, { isMetaMask: true });
+    (window as unknown as { ethereum?: unknown }).ethereum = { request: mm.request, providers: [mm, mm] };
+    expect(getAvailableWallets().filter((w) => w.id === 'metamask')).toHaveLength(1);
   });
 });
 
-describe('injectedProviders stays read-only', () => {
-  it('lists providers without touching the global', () => {
-    const a = wallet(() => null, { isMetaMask: true });
-    const b = wallet(() => null, { isRabby: true });
-    (window as unknown as { ethereum?: unknown }).ethereum = { request: a.request, providers: [a, b] };
-    expect(injectedProviders()).toEqual([a, b]);
+describe('connectWallet', () => {
+  it('returns the account address', async () => {
+    install([wallet({}, { isMetaMask: true })]);
+    await expect(connectWallet('metamask')).resolves.toBe(ADDRESS);
   });
 
-  it('names wallets from their advertised flags', () => {
-    expect(describeProvider(wallet(() => null, { isMetaMask: true }))).toBe('MetaMask');
-    expect(describeProvider(wallet(() => null, { isRabby: true }))).toBe('Rabby');
-    expect(describeProvider(wallet(() => null, { isCoinbaseWallet: true }))).toBe('Coinbase Wallet');
+  /* The regression this whole change exists to fix: a Rabby user was told the
+     Snap only exists in MetaMask and could not connect at all. */
+  it('connects through Rabby without mentioning the Snap', async () => {
+    install([{ ...wallet(), isRabby: true }]);
+    await expect(connectWallet('rabby')).resolves.toBe(ADDRESS);
+  });
+
+  it('asks the wallet the user chose, not the one that injected first', async () => {
+    const mm = wallet({}, { isMetaMask: true });
+    const rb = wallet({}, { isRabby: true });
+    install([mm, rb]);
+
+    await connectWallet('rabby');
+
+    expect(rb.asked).toContain('eth_requestAccounts');
+    expect(mm.asked).toHaveLength(0);
+  });
+
+  it('switches network when the wallet is elsewhere', async () => {
+    const w = wallet({ chainId: '0x1' }, { isRabby: true });
+    install([w]);
+    await connectWallet('rabby');
+    expect(w.asked).toContain('wallet_switchEthereumChain');
+  });
+
+  it('does not switch when already on the right chain', async () => {
+    const w = wallet({}, { isRabby: true });
+    install([w]);
+    await connectWallet('rabby');
+    expect(w.asked).not.toContain('wallet_switchEthereumChain');
+  });
+
+it('adds the chain when the wallet has never heard of it', async () => {
+    // 4902 is how a wallet says "I do not have that chain". A wallet on mainnet
+    // that has never seen Studionet refuses the switch, and only the add-then-
+    // retry path gets the user connected.
+    const w = wallet({ chainId: '0x1' }, { isRabby: true });
+    let added = false;
+    w.request = vi.fn((r: Request) => {
+      w.asked.push(r.method);
+      if (r.method === 'eth_chainId') return Promise.resolve('0x1');
+      if (r.method === 'wallet_addEthereumChain') {
+        added = true;
+        return Promise.resolve(null);
+      }
+      if (r.method === 'wallet_switchEthereumChain') {
+        // Refuse only until the chain has been added — as a real wallet does.
+        if (!added) return Promise.reject(Object.assign(new Error('unknown chain'), { code: 4902 }));
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(r.method === 'eth_requestAccounts' ? [ADDRESS] : null);
+    });
+    install([w]);
+
+    await connectWallet('rabby');
+    expect(w.asked).toContain('wallet_addEthereumChain');
+  });
+
+  it('reports a declined connection as a decline, not a fault', async () => {
+    const w = wallet({ failOn: 'eth_requestAccounts' }, { isRabby: true });
+    install([w]);
+    await expect(connectWallet('rabby')).rejects.toThrow(/declined/i);
+  });
+
+  it('explains an empty account list rather than returning undefined', async () => {
+    const w = wallet({ accounts: [] }, { isRabby: true });
+    install([w]);
+    await expect(connectWallet('rabby')).rejects.toThrow(/no account/i);
+  });
+
+  it('refuses a wallet that is not installed, by name', async () => {
+    install([wallet({}, { isMetaMask: true })]);
+    await expect(connectWallet('rabby')).rejects.toThrow(/Rabby was not detected/i);
+  });
+
+it('reads the chain id without throwing when the wallet refuses', async () => {
+    // A wallet mid-unlock can reject chain queries. The network strip has to render
+    // something, so this must answer false rather than reject.
+    install([wallet({ failOn: 'eth_chainId' }, { isMetaMask: true })]);
+    await expect(isOnGenLayerNetwork()).resolves.toBe(false);
+  });
+});
+
+describe('provider identity', () => {
+  it('recognises Rabby from EIP-6963 metadata alone', () => {
+    delete (window as unknown as { ethereum?: unknown }).ethereum;
+    const cleanup = discoverWalletProviders(() => {});
+    window.dispatchEvent(
+      new CustomEvent('eip6963:announceProvider', {
+        detail: {
+          info: { uuid: 'u', name: 'Some Wallet', icon: '', rdns: 'com.rabby' },
+          provider: wallet(),
+        },
+      }),
+    );
+    expect(getAvailableWallets().map((w) => w.id)).toEqual(['rabby']);
+    cleanup();
+  });
+
+  it('ignores a wallet it cannot identify, rather than guessing', () => {
+    delete (window as unknown as { ethereum?: unknown }).ethereum;
+    const cleanup = discoverWalletProviders(() => {});
+    window.dispatchEvent(
+      new CustomEvent('eip6963:announceProvider', {
+        detail: { info: { uuid: 'u', name: 'Unknown', icon: '', rdns: 'com.unknown' }, provider: wallet() },
+      }),
+    );
+    expect(getAvailableWallets()).toHaveLength(0);
+    cleanup();
   });
 });
