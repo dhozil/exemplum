@@ -15,11 +15,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-  chosenProvider,
-  client,
+  connectWallet,
   describeProvider,
+  injectedProviders,
   setChosenProvider,
-  withProvider,
 } from './chain';
 import { describeError, type FriendlyError } from './errors';
 
@@ -136,55 +135,39 @@ async function developmentAccount(): Promise<unknown | null> {
  * Omitting `provider` is only for the case of exactly one wallet, where there is
  * nothing to choose and pinning it changes nothing.
  */
+/**
+ * Connect through a wallet the user picked.
+ *
+ * The work is done by `connectWallet` rather than the SDK's `client.connect()`,
+ * for reasons documented there: `connect()` never requests an account, and it
+ * reads `window.ethereum` rather than the chosen wallet.
+ */
 export async function connectViaSnap(provider?: unknown): Promise<void> {
   publish({ ...INITIAL, connecting: true });
-  const chosenWallet = provider as Parameters<typeof withProvider>[0] | undefined;
+  const wallet = (provider as Parameters<typeof connectWallet>[0] | undefined) ?? injectedProviders()[0];
+  if (!wallet) {
+    publish({
+      ...INITIAL,
+      error: {
+        title: 'No browser wallet found',
+        detail:
+          'Install MetaMask, or use the development account. This page talks to a wallet extension directly; there is nothing to connect to without one.',
+        tone: 'warn',
+        retryable: false,
+      },
+    });
+    return;
+  }
   try {
-    if (chosenWallet) setChosenProvider(chosenWallet);
-    const connect = () => client.connect();
-    const address = chosenWallet
-      ? await withProvider(chosenWallet, async () => {
-          await connect();
-          return client.account?.address;
-        })
-      : (await connect(), client.account?.address);
-
-    if (!address) {
-      publish({ ...INITIAL, error: describeError(new Error('No account address was returned.')) });
-      return;
-    }
-    const label = chosenWallet ? describeProvider(chosenWallet) : 'MetaMask';
+    setChosenProvider(wallet);
+    const address = await connectWallet(wallet);
+    const label = describeProvider(wallet);
     const next: AccountState = { address, kind: 'snap', label, connecting: false, error: null };
     persist(address, 'snap', label);
     publish(next);
   } catch (err) {
-    publish({ ...INITIAL, error: describeError(snapError(err)) });
+    publish({ ...INITIAL, error: describeError(err) });
   }
-}
-
-/**
- * Make the SDK's failure name the wallet the user actually chose, and say what
- * to do about it.
- *
- * The SDK reports a missing Snap as "MetaMask is not installed", which is wrong
- * twice over: MetaMask usually *is* installed, and the real gap is the GenLayer
- * Snap inside it. A user who reads that goes looking for a missing extension
- * instead of installing a Snap, so the message is replaced rather than echoed.
- *
- * The Snap id is repeated here because the SDK does not export it and the user
- * has to be able to act on the name.
- */
-function snapError(err: unknown): Error {
-  const message = String(err instanceof Error ? err.message : err);
-  const label = chosenProvider() ? describeProvider(chosenProvider()!) : null;
-  if (/MetaMask is not installed/i.test(message)) {
-    return new Error(
-      label && !/metamask/i.test(label)
-        ? `${label} cannot hold the GenLayer Snap — the Snap only exists in MetaMask. Open MetaMask and connect there, or use the development account.`
-        : 'The GenLayer Snap is not installed in MetaMask. Open MetaMask, allow this site, and choose "Install Snap" when prompted, then connect again.',
-    );
-  }
-  return err instanceof Error ? err : new Error(message);
 }
 
 export async function connectDevelopment(): Promise<void> {

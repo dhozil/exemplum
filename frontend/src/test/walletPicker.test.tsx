@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { AccountControl } from '../components/AccountButton';
-import { describeProvider, injectedProviders, withProvider } from '../lib/chain';
+import { describeProvider, injectedProviders } from '../lib/chain';
 import { disconnect, getAccount } from '../lib/wallet';
 
 /**
@@ -22,41 +22,43 @@ function fakeWallet(extra: Record<string, unknown> = {}): Provider {
   return { request: vi.fn().mockResolvedValue('0xabc'), ...extra } as Provider;
 }
 
-const account = { address: '0x1234567890abcdef1234567890abcdef12345678' };
-/** The provider the SDK actually talked to. Asserting on this rather than on
- *  "connect was called" is the whole point: a connect that ran against the wrong
- *  wallet looks identical to a correct one unless you check who answered. */
-let askedProvider: unknown;
-let connectCalls: number;
-let clientAccount: { address: string } | null;
-/** When set, the next `connect` rejects with this instead of succeeding. */
-let connectFailure: Error | null = null;
 /** window.ethereum as it was before the test, restored in afterEach. */
 let snapshot: unknown;
 
-vi.mock('../lib/chain', async () => {
-  const actual = await vi.importActual<typeof import('../lib/chain')>('../lib/chain');
-  return {
-    ...actual,
-    client: {
-      get account() {
-        return clientAccount;
-      },
-      connect: async () => {
-        connectCalls += 1;
-        askedProvider = (window as unknown as { ethereum?: unknown }).ethereum;
-        if (connectFailure) throw connectFailure;
-        clientAccount = { address: account.address };
-      },
-    },
-  };
-});
+const CHAIN_ID = '0x' + (3199).toString(16);
+const SNAP = 'npm:genlayer-wallet-plugin';
 
-/* `useAccount` is mocked to a fixed disconnected state, so the picker always
-   renders. The store also persists across tests through localStorage, and an
-   earlier connected state would render the address menu instead of the button —
-   which fails as "cannot find /connect account/i" and reads like a missing
-   picker rather than leftover state. */
+/**
+ * A wallet that answers the real connect sequence, so a connect in these tests
+ * takes the same path a browser takes rather than a stubbed-out one.
+ *
+ * `request` is a `vi.fn`, so which provider was asked is observable. That is the
+ * assertion that matters for the picker: a connect that ran against the wrong
+ * wallet is otherwise indistinguishable from a correct one.
+ */
+function connectable(extra: Record<string, unknown> = {}, address = '0x' + '22'.repeat(20)): Provider {
+  const request = vi.fn((r: { method: string }) => {
+    switch (r.method) {
+      case 'eth_chainId':
+        return Promise.resolve(CHAIN_ID);
+      case 'wallet_getSnaps':
+        return Promise.resolve({ [SNAP]: { id: SNAP } });
+      case 'eth_requestAccounts':
+        return Promise.resolve([address]);
+      default:
+        return Promise.resolve(null);
+    }
+  });
+  return { request, ...extra } as unknown as Provider;
+}
+
+/** The RPC methods a given wallet was asked for, in order. */
+function methodsAsked(wallet: Provider): string[] {
+  return (
+    wallet.request as unknown as { mock: { calls: [{ method: string }][] } }
+  ).mock.calls.map((c) => c?.[0]?.method ?? String(c));
+}
+
 /* The wallet store is a module-level singleton, so a connect in one test
    publishes to it and every later test sees a connected account. That is why
    "cannot find /connect account/i" appeared only when the whole file ran: the
@@ -67,10 +69,6 @@ vi.mock('../lib/chain', async () => {
 beforeEach(() => {
   disconnect();
   localStorage.clear();
-  askedProvider = undefined;
-  connectCalls = 0;
-  clientAccount = null;
-  connectFailure = null;
   snapshot = (window as unknown as { ethereum?: unknown }).ethereum;
 });
 
@@ -120,63 +118,30 @@ describe('provider discovery', () => {
   });
 });
 
-describe('withProvider', () => {
-  it('points window.ethereum at the chosen wallet for the call', async () => {
-    const chosen = fakeWallet({ isRabby: true });
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
 
-    let seen: unknown;
-    await withProvider(chosen as never, async () => {
-      seen = (window as unknown as { ethereum?: unknown }).ethereum;
-    });
+describe('connect failures are visible', () => {
+  /* connectViaSnap publishes a friendly error into the store and nothing
+     rendered it, so a connect that failed — Snap not installed being the common
+     one — looked exactly like a connect that was never attempted.
 
-    expect(seen).toBe(chosen);
-  });
+     The fake provider answers the real RPC sequence, so these exercise the same
+     path a browser takes: the failure comes from the wallet refusing, not from a
+     stubbed-out connect. */
+  function walletThat(behaviour: (r: { method: string }) => unknown, extra: Record<string, unknown> = {}) {
+    return { request: vi.fn((r: { method: string }) => Promise.resolve(behaviour(r))), ...extra } as never;
+  }
 
-  /* Rebinding a global is the workaround for the SDK ignoring its own provider
-     argument. If the rebind leaks, a later call could silently go to the wallet
-     the user did not pick, which is the exact bug this exists to fix. */
-  it('restores the previous provider afterwards', async () => {
-    const original = fakeWallet({ isMetaMask: true });
-    (window as unknown as { ethereum?: unknown }).ethereum = original;
+  const CHAIN_ID = '0x' + (3199).toString(16);
 
-    await withProvider(fakeWallet({ name: 'Rabby' }) as never, async () => {});
-
-    expect((window as unknown as { ethereum?: unknown }).ethereum).toBe(original);
-  });
-
-  it('restores the previous provider even when the call throws', async () => {
-    const original = fakeWallet({ isMetaMask: true });
-    (window as unknown as { ethereum?: unknown }).ethereum = original;
-
-    await expect(
-      withProvider(fakeWallet({ name: 'Rabby' }) as never, async () => {
-        throw new Error('user closed the wallet');
-      }),
-    ).rejects.toThrow('user closed the wallet');
-
-    expect((window as unknown as { ethereum?: unknown }).ethereum).toBe(original);
-  });
-
-  it('leaves no stub behind when there was no provider at all', async () => {
-    delete (window as unknown as { ethereum?: unknown }).ethereum;
-    await withProvider(fakeWallet({ name: 'Rabby' }) as never, async () => {});
-    expect('ethereum' in window).toBe(false);
-  });
-});
-
-describe('the connect error is on screen, not just in the store', () => {
-  /* The store holding an error proves nothing. What the user needs is the error
-     rendered, and this is the assertion that would have caught it: the original
-     bug was a `FriendlyError` sitting in the store with no component reading it,
-     so every store-level test passed while the button silently reverted to
-     "Connect account" and the user saw no reason for it.
-
-     `AccountControl` reads the real store, so failing a connect and then
-     rendering the control shows the whole path. */
-  it('renders a connect failure where the user is already looking', async () => {
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
-    connectFailure = new Error('MetaMask is not installed.');
+  it('shows the failure where the user is already looking', async () => {
+    (window as unknown as { ethereum?: unknown }).ethereum = walletThat(
+      (r) => {
+        if (r.method === 'eth_chainId') return CHAIN_ID;
+        if (r.method === 'wallet_getSnaps') throw new Error('Method not found');
+        return null;
+      },
+      { isMetaMask: true },
+    );
 
     render(<AccountControl />);
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
@@ -184,90 +149,75 @@ describe('the connect error is on screen, not just in the store', () => {
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(/snap/i)).toBeInTheDocument();
+    expect(getAccount().connecting).toBe(false);
   });
 
-  it('clears the failure on the next attempt rather than leaving it stale', async () => {
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
-    connectFailure = new Error('MetaMask is not installed.');
+  it('does not blame a missing MetaMask when MetaMask is installed', async () => {
+    (window as unknown as { ethereum?: unknown }).ethereum = walletThat(
+      (r) => {
+        if (r.method === 'eth_chainId') return CHAIN_ID;
+        if (r.method === 'wallet_getSnaps') throw new Error('Method not found');
+        return null;
+      },
+      { isMetaMask: true },
+    );
+
     render(<AccountControl />);
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
     await waitFor(() => expect(getAccount().error).not.toBeNull());
 
-    connectFailure = null;
+const e = getAccount().error!;
+    expect(`${e.title} ${e.detail}`).not.toMatch(/MetaMask is not installed/);
+  });
+
+  it('clears the failure on the next attempt rather than leaving it stale', async () => {
+    let broken = true;
+    (window as unknown as { ethereum?: unknown }).ethereum = walletThat(
+      (r) => {
+        if (r.method === 'eth_chainId') return CHAIN_ID;
+        if (r.method === 'wallet_getSnaps') {
+          if (broken) throw new Error('Method not found');
+          return { 'npm:genlayer-wallet-plugin': { id: 'npm:genlayer-wallet-plugin' } };
+        }
+        if (r.method === 'eth_requestAccounts') return ['0x' + '11'.repeat(20)];
+        return null;
+      },
+      { isMetaMask: true },
+    );
+
+    render(<AccountControl />);
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    await waitFor(() => expect(getAccount().error).not.toBeNull());
+
+    broken = false;
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await waitFor(() => expect(getAccount().address).toBe('0x' + '11'.repeat(20)));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
-
-describe('connect failures are visible', () => {
-  /* The reason this file exists beyond the picker: `connectViaSnap` published a
-     friendly error into the store and nothing rendered it. The button reverted
-     to "Connect account" with no message, so a connect that failed — Snap not
-     installed being the common one — looked exactly like a connect that was
-     never attempted. */
-  it('shows the error the store holds, next to the button', async () => {
-    const { connectViaSnap: realConnect } = await import('../lib/wallet');
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
-    connectFailure = new Error('MetaMask is not installed.');
-
-    await realConnect();
-
-    const state = getAccount();
-    expect(state.error).not.toBeNull();
-    expect(state.connecting).toBe(false);
-  });
-
-  it('explains a missing Snap in terms the user can act on', async () => {
-    const { connectViaSnap: realConnect } = await import('../lib/wallet');
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
-    connectFailure = new Error('MetaMask is not installed.');
-
-    await realConnect();
-
-    const e = getAccount().error!;
-    const text = `${e.title} ${e.detail}`;
-    // "MetaMask is not installed" sends the user looking for a missing browser
-    // extension when MetaMask is installed and only the Snap is missing.
-    expect(text).toMatch(/snap/i);
-    expect(text).not.toMatch(/MetaMask is not installed/);
-  });
-
-  it('says which wallet cannot hold the Snap when it is not MetaMask', async () => {
-    const { connectViaSnap: realConnect } = await import('../lib/wallet');
-    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isRabby: true });
-    connectFailure = new Error('MetaMask is not installed.');
-
-    await realConnect(fakeWallet({ isRabby: true }));
-
-    const text = `${getAccount().error!.title} ${getAccount().error!.detail}`;
-    expect(text).toMatch(/rabby/i);
-  });
-});
-
 describe('AccountControl wallet picker', () => {
-  /* The provider list is read at render, so it has to be installed before
-     render() rather than after — setting it afterwards and expecting the
-     already-rendered component to notice is a test that cannot pass, and the
-     failure mode looks like a broken picker rather than a broken test. */
+  /* The provider list is read when the button is clicked, so it has to be
+     installed before render() rather than after: setting it afterwards and
+     expecting an already-rendered component to notice is a test that cannot pass,
+     and the failure reads like a broken picker rather than a broken test. */
   function renderWith(wallets: unknown) {
     (window as unknown as { ethereum?: unknown }).ethereum = wallets;
     return render(<AccountControl />);
   }
 
   it('connects directly when only one wallet is installed', async () => {
-    renderWith(fakeWallet({ isMetaMask: true }));
+    const only = connectable({ isMetaMask: true });
+    renderWith(only);
 
-    // `connect` resolves asynchronously and the store publishes from it, so the
-    // click's state update lands after userEvent returns. Wrapped so React is not
-    // warned about an update it never got to see.
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
-    await waitFor(() => expect(connectCalls).toBe(1));
+    await waitFor(() => expect(getAccount().address).not.toBeNull());
+    expect(methodsAsked(only)).toContain('eth_requestAccounts');
   });
 
   it('asks the user to pick when several are installed', async () => {
     renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
     });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
@@ -275,9 +225,9 @@ describe('AccountControl wallet picker', () => {
     expect(screen.getByRole('menuitem', { name: /rabby/i })).toBeInTheDocument();
   });
 
-  /* The regression that shipped: a `position: fixed; inset: 0` backdrop rendered
+  /* The regression that shipped: a position: fixed; inset: 0 backdrop rendered
      inside the sticky header covers the whole viewport, and because it sits in
-     the header's stacking context (`z-index: 20`) it also covers the Connect
+     the header's stacking context (z-index: 20) it also covers the Connect
      button. The drawer opened and then swallowed every subsequent click, so the
      control looked alive once and dead afterwards.
 
@@ -286,21 +236,18 @@ describe('AccountControl wallet picker', () => {
      at all, and the button must keep receiving clicks while the drawer is open. */
   it('has no full-viewport backdrop to swallow clicks', async () => {
     renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
     });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
     await screen.findByRole('menu', { name: /choose a wallet/i });
 
-    const fullscreen = document.querySelectorAll(
-      'button, div, span',
-    );
-    for (const el of fullscreen) {
+    for (const el of document.querySelectorAll('button, div, span')) {
       const s = (el as HTMLElement).style;
-      if (s.position === 'fixed' && (s.inset === '0' || s.top === '0px')) {
+if (s.position === 'fixed' && (s.inset === '0' || s.top === '0px')) {
         throw new Error(
-          `a full-viewport element (${el.tagName}) would sit over the header and eat clicks`,
+          'a full-viewport element would sit over the header and eat clicks',
         );
       }
     }
@@ -308,8 +255,8 @@ describe('AccountControl wallet picker', () => {
 
   it('keeps accepting clicks on the button while the drawer is open', async () => {
     renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
     });
 
     const button = screen.getByRole('button', { name: /connect account/i });
@@ -323,8 +270,8 @@ describe('AccountControl wallet picker', () => {
 
   it('closes the drawer on Escape, so it is not stuck open', async () => {
     renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
     });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
@@ -334,52 +281,51 @@ describe('AccountControl wallet picker', () => {
     expect(screen.queryByRole('menu', { name: /choose a wallet/i })).not.toBeInTheDocument();
   });
 
-  it('does not connect to the injection-race winner before the user chooses', async () => {
-    renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
-    });
+  it('does not connect before the user chooses', async () => {
+    const metamask = connectable({ isMetaMask: true });
+    const rabby = connectable({ isRabby: true });
+    renderWith({ request: metamask.request, providers: [metamask, rabby] });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
-    expect(connectCalls).toBe(0);
+    expect(methodsAsked(metamask)).toHaveLength(0);
+    expect(methodsAsked(rabby)).toHaveLength(0);
   });
 
   it('connects the wallet the user picked, not the injection-race winner', async () => {
-    const metamask = fakeWallet({ isMetaMask: true });
-    const rabby = fakeWallet({ isRabby: true });
-    // MetaMask injected first, so it is what `window.ethereum` points at.
+    const metamask = connectable({ isMetaMask: true });
+    const rabby = connectable({ isRabby: true }, '0x' + '44'.repeat(20));
+    // MetaMask injected first, so it is what window.ethereum points at.
     renderWith({ request: metamask.request, providers: [metamask, rabby] });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
     await userEvent.click(await screen.findByRole('menuitem', { name: /rabby/i }));
-    await waitFor(() => expect(connectCalls).toBe(1));
+    await waitFor(() => expect(getAccount().address).toBe('0x' + '44'.repeat(20)));
 
-    expect(connectCalls).toBe(1);
-    // The point of the whole picker: the wallet the user named is the one that
-    // got asked, not the one that happened to inject first.
-    expect(askedProvider).toBe(rabby);
+    expect(methodsAsked(rabby)).toContain('eth_requestAccounts');
+    // The point of the whole picker: the wallet the user declined was never asked.
+    expect(methodsAsked(metamask)).toHaveLength(0);
   });
 
-  it('leaves the global pointing where it was once the user is connected', async () => {
-    const metamask = fakeWallet({ isMetaMask: true });
-    const rabby = fakeWallet({ isRabby: true });
-    const before = { request: metamask.request, providers: [metamask, rabby] };
+  it('leaves window.ethereum pointing where it was', async () => {
+    const before = {
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
+    };
     renderWith(before);
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: /rabby/i }));
-    await waitFor(() => expect(connectCalls).toBe(1));
-    expect(connectCalls).toBe(1);
+    await userEvent.click(await screen.findByRole('menuitem', { name: /metamask/i }));
+    await waitFor(() => expect(getAccount().address).not.toBeNull());
 
-    // A leaked rebind would send this user's later transactions to the wallet
-    // they just declined to use.
+    // A rebind that leaked would send later transactions to a wallet the user did
+    // not pick. This is also what threw "only a getter" on real wallets.
     expect((window as unknown as { ethereum?: unknown }).ethereum).toBe(before);
   });
 
   it('says which wallets can take the Snap, rather than failing later', async () => {
     renderWith({
-      request: (fakeWallet({ isMetaMask: true })).request,
-      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+      request: connectable({ isMetaMask: true }).request,
+      providers: [connectable({ isMetaMask: true }), connectable({ isRabby: true })],
     });
 
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));

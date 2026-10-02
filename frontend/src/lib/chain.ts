@@ -3,34 +3,20 @@ import { createClient } from 'genlayer-js';
 import { RPC_URL, chain } from '../config';
 import { recordRateLimit } from './errors';
 
-/**
- * The wallet the user actually chose, published before any SDK call.
+/** An EIP-1193 provider, relaxed to allow the Snap RPCs.
  *
- * `genlayer-js` reads `window.ethereum` directly in eleven places, and never
- * looks at EIP-6963. With more than one extension installed, the browser hands
- * `window.ethereum` to whichever one won the injection race, so a user with both
- * MetaMask and another wallet cannot choose: `connect()` talks to whichever won,
- * and the alternative wallet is invisible. It also reports "MetaMask is not
- * installed" for the wallet that is actually present, because the losing
- * extension answers `wallet_getSnaps` with a method-not-found error.
- *
- * `createClient` does accept a `provider` and uses it for transaction signing
- * (see its `request` wrapper), so signing can be pointed at the chosen wallet.
- * The snap calls cannot: `connect()` and `metamaskClient()` ignore the provider.
- * So this module both lets the app pin the provider for signing and offers the
- * chosen provider back to `connectViaSnap`, which rebinds `window.ethereum` for
- * the duration of that one call.
- *
- * Rebinding a global is a workaround against an SDK that does not thread its own
- * provider through. It is scoped and reversible rather than permanent, and it is
- * the difference between the user picking their wallet and the user getting
- * whichever extension happened to inject first.
- */
-type Provider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+ *  `params` is an array for almost every method, but `wallet_requestSnaps` takes
+ *  an object keyed by Snap id. Narrowing the type to arrays — the obvious reading
+ *  of EIP-1193 — makes the one call that installs the Snap a type error, so both
+ *  shapes are allowed rather than cast away at the call site. */
+type Provider = {
+  request: (args: { method: string; params?: unknown[] | Record<string, unknown> }) => Promise<unknown>;
+};
 
+/** The provider the user picked, or null. Retained so a reconnect can reuse it
+ *  without asking again, and so signing can be pointed at it. */
 let chosen: Provider | null = null;
 
-/** The provider the user picked, or null if they have not picked one. */
 export function chosenProvider(): Provider | null {
   return chosen;
 }
@@ -39,7 +25,16 @@ export function setChosenProvider(provider: Provider | null): void {
   chosen = provider;
 }
 
-/** `window.ethereum` as declared, since it is not in lib.dom's type. */
+/**
+ * `window.ethereum` as declared, since it is not in lib.dom's type.
+ *
+ * Read-only on purpose. An earlier version rebound this global so the SDK would
+ * talk to the chosen wallet, and that threw
+ * `Cannot set property ethereum of #<Window> which has only a getter` on
+ * wallets that expose it as a getter. The rebind was a workaround for an SDK
+ * that ignores its own `provider` argument, and it broke the one case it was
+ * meant to fix.
+ */
 export function injectedProviders(): Provider[] {
   if (typeof window === 'undefined') return [];
   const eth = (
@@ -76,30 +71,108 @@ export function describeProvider(provider: Provider): string {
   return p.name ?? 'Browser wallet';
 }
 
+export const client = createClient({ chain, endpoint: RPC_URL });
+
+/** The GenLayer Snap, as `genlayer-js` names it. Not exported by the SDK. */
+export const SNAP_ID = 'npm:genlayer-wallet-plugin';
+
+/** A wallet that supports the Snap RPCs, or the reason it does not. */
+export type SnapSupport = { supported: true } | { supported: false; reason: string };
+
 /**
- * Run `fn` with `window.ethereum` set to `provider`, then put it back.
+ * Ask a wallet for the GenLayer Snap, and for an account, without touching the
+ * SDK's own `connect`.
  *
- * The Snap RPCs the SDK needs (`wallet_getSnaps`, `wallet_requestSnaps`) only
- * exist in MetaMask. Asking a non-MetaMask wallet for them throws, and the SDK
- * turns that into "MetaMask is not installed" - a message about the wrong wallet
- * when the user has MetaMask and picked something else.
+ * `client.connect()` is not usable on its own. Reading it: it checks
+ * `window.ethereum`, switches chain, installs the Snap, sets `client.chain` —
+ * and never requests an account or assigns `client.account`. So the address a
+ * caller reads afterwards is always undefined, which is why a connect that
+ * appeared to run produced "No account address was returned" and no account
+ * ever appeared. It also reads the global rather than the wallet the user chose.
+ *
+ * So the three things a connect has to do are done here, against the chosen
+ * provider: switch chain, ensure the Snap, request the account. Then the address
+ * is put on the client, because that is the property the SDK's write path reads
+ * when it has no explicit account to sign with.
  */
-export async function withProvider<T>(provider: Provider, fn: () => Promise<T>): Promise<T> {
-  const w = window as unknown as { ethereum?: Provider };
-  const before = w.ethereum;
-  w.ethereum = provider;
-  try {
-    return await fn();
-  } finally {
-    if (before === undefined) {
-      delete w.ethereum;
-    } else {
-      w.ethereum = before;
-    }
+export async function connectWallet(provider: Provider): Promise<string> {
+  const chainIdHex = `0x${chain.id.toString(16)}`;
+
+  const current = await provider.request({ method: 'eth_chainId' });
+  if (String(current).toLowerCase() !== chainIdHex) {
+    await provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [
+        {
+          chainId: chainIdHex,
+          chainName: chain.name,
+          rpcUrls: [RPC_URL],
+          nativeCurrency: chain.nativeCurrency,
+          blockExplorerUrls: [chain.blockExplorers?.default.url].filter(Boolean),
+        },
+      ],
+    });
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
   }
+
+  const snap = await ensureSnap(provider);
+  if (!snap.supported) throw new Error(snap.reason);
+
+  const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[] | undefined;
+  const address = accounts?.[0];
+  if (!address) {
+    throw new Error(
+      'The wallet returned no account. Unlock it and allow this site, then connect again.',
+    );
+  }
+
+  // The write path reads this when it has no account of its own, and the SDK
+  // only ever assigns it from `createClient({ account })` — which cannot be
+  // known before the user picks a wallet.
+  (client as unknown as { account: string }).account = address;
+  (client as unknown as { chain: unknown }).chain = chain;
+  return address;
 }
 
-export const client = createClient({ chain, endpoint: RPC_URL });
+async function ensureSnap(provider: Provider): Promise<SnapSupport> {
+  let installed: Record<string, { id?: string }> = {};
+  try {
+    installed = ((await provider.request({ method: 'wallet_getSnaps' })) ??
+      {}) as Record<string, { id?: string }>;
+  } catch (err) {
+    // Only MetaMask implements the Snap RPCs. Other wallets answer with
+    // "method not found", and the SDK reports that as "MetaMask is not
+    // installed" — which sends the user looking for a missing extension when
+    // MetaMask is installed and the real gap is that this wallet has no Snap.
+    return {
+      supported: false,
+      reason: `${describeProvider(provider)} does not support the GenLayer Snap. The Snap only exists in MetaMask — connect with MetaMask, or use the development account.`,
+    };
+  }
+
+  const present = Object.values(installed).some((s) => s?.id === SNAP_ID);
+  if (present) return { supported: true };
+
+  try {
+    // `params` is an object keyed by Snap id here, not the array most EIP-1193
+    // calls take. The type has to allow both or this call would not type-check.
+    await provider.request({
+      method: 'wallet_requestSnaps',
+      params: { [SNAP_ID]: {} },
+    });
+    return { supported: true };
+  } catch (err) {
+    const blob = String(err instanceof Error ? err.message : err);
+    if (/4001|rejected|denied/i.test(blob)) {
+      return {
+        supported: false,
+        reason:
+          'Installing the GenLayer Snap was declined, so there is no account to connect. Try again and approve it in the wallet.',
+      };
+    }
+    return { supported: false, reason: `The GenLayer Snap could not be installed: ${blob}` };
+  }
+}
 
 /**
  * Probe the node without throwing. Used by the network strip, which must render
