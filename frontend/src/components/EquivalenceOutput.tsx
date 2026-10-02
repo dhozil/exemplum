@@ -87,33 +87,3 @@ export function EquivalenceOutput({
     </div>
   );
 }
-
-/** The per-revision view, for when a verdict has been revisited more than once. */
-export function EquivalenceRevision({
-  revision,
-  verdict,
-  reasoning,
-  at,
-}: {
-  revision: number;
-  verdict: string;
-  reasoning?: string;
-  at?: string;
-}) {
-  return (
-    <div className="srclist__item">
-      <div className="srclist__head">
-        <span className="label">
-          revision {revision}
-          {at ? ` · ${at}` : ''}
-        </span>
-        <VerdictBadge verdict={verdict} />
-      </div>
-      {reasoning ? (
-        <blockquote className="quote">{reasoning}</blockquote>
-      ) : (
-        <p className="hash">No reasoning recorded for this revision.</p>
-      )}
-    </div>
-  );
-}
