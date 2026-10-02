@@ -23,3 +23,9 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# Working notes for AI assistants. Not part of the project: these are scratch
+# notes about my own process, including the mistakes, and they would read as
+# project documentation to anyone else. Tracked and untracked both ignored, so a
+# local copy stays available without ever being committable by accident.
+AGENT.md
