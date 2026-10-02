@@ -190,8 +190,6 @@ describe('the connect error is on screen, not just in the store', () => {
   it('clears the failure on the next attempt rather than leaving it stale', async () => {
     (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
     connectFailure = new Error('MetaMask is not installed.');
-    const { connectViaSnap: connect } = await import('../lib/wallet');
-
     render(<AccountControl />);
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
     await waitFor(() => expect(getAccount().error).not.toBeNull());
@@ -199,7 +197,6 @@ describe('the connect error is on screen, not just in the store', () => {
     connectFailure = null;
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    void connect;
   });
 });
 
