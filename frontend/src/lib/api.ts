@@ -86,6 +86,48 @@ export const getChallengeLog = (offset: number, limit: number) =>
     rows.map((r) => JSON.parse(r) as ChallengeEntry),
   );
 
+/** `get_records_paginated` refuses a limit above 50. */
+export const MAX_PAGE = 50;
+
+export interface ScanResult {
+  rows: RecordSummary[];
+  /** Records the registry holds in total, from `get_stats`. */
+  total: number;
+  /** How many were actually read. Below `total` when the cap cut the scan short. */
+  scanned: number;
+  /** True when the cap stopped it, so the caller can say so rather than imply
+   *  the list is complete. */
+  truncated: boolean;
+}
+
+/**
+ * Read a bounded slice of the whole ledger.
+ *
+ * Needed because there is no view that filters by submitter, so "my records" has
+ * to be found client-side — and filtering the one page on screen reports "none" for
+ * anyone whose records are further down. That is worse than no filter at all,
+ * because it looks like an answer.
+ *
+ * The cap exists because every page is a `gen_call` and StudioNet rate-limits by
+ * IP, around 30 a minute. Past a few thousand records a full scan would spend the
+ * whole budget on a filter, so it stops and reports `truncated` rather than
+ * quietly showing a partial list as if it were complete.
+ */
+export async function scanRecords(cap = 500): Promise<ScanResult> {
+  const { total } = await getStats();
+  const target = Math.min(total, cap);
+  const rows: RecordSummary[] = [];
+
+  for (let offset = 0; offset < target; offset += MAX_PAGE) {
+    const page = await getRecords(offset, Math.min(MAX_PAGE, target - offset));
+    rows.push(...page);
+    // A short page means the registry moved under us, or `total` was stale.
+    if (page.length < MAX_PAGE) break;
+  }
+
+  return { rows, total, scanned: rows.length, truncated: rows.length < total };
+}
+
 /* -------------------------------------------------------------- settlement */
 
 export const getSettlementStats = () => read<SettlementStats>(SETTLEMENT, 'get_stats');
