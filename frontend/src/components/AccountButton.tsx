@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   connectDevelopment,
   connectViaSnap,
@@ -22,103 +22,134 @@ function isMetaMaskLike(provider: unknown): boolean {
  * prominent when a write is about to be attempted. The kind of account is always
  * spelled out — a development key is not a wallet signature, and pretending
  * otherwise would be the wrong kind of clever.
+ *
+ * Picking a wallet is a deliberate step rather than a race. `genlayer-js` reads
+ * `window.ethereum` directly and never consults EIP-6963, so with more than one
+ * extension installed the browser hands it whichever registered first and the
+ * user has no way to reach the other. When there is a choice to make, this asks.
  */
 export function AccountControl() {
   const account = useAccount();
   const [open, setOpen] = useState(false);
-  const [choosing, setChoosing] = useState(false);
+  const [wallets, setWallets] = useState<{ uid: string; name: string; provider: unknown; isSnapLikely: boolean }[]>([]);
+  const root = useRef<HTMLDivElement>(null);
 
-  /* Read at render rather than kept in state: extensions inject asynchronously
-     after first paint, and a snapshot taken on mount would miss a wallet that
-     arrived a moment later — which is the same silent-default bug in a slower
-     form. */
-  const wallets = useMemo(
-    () =>
-      injectedProviders().map((p, i) => ({
-        uid: `${describeProvider(p)}-${i}`,
-        name: describeProvider(p),
-        provider: p,
-        isSnapLikely: isMetaMaskLike(p),
-      })),
-    [],
-  );
+  /* Read on demand rather than from a render-time snapshot. Extensions inject
+     asynchronously after first paint, so a snapshot taken during the first render
+     can be empty and would hide the picker for the rest of the session — the same
+     silent-default bug, in a slower form. */
+  function readWallets() {
+    return injectedProviders().map((p, i) => ({
+      uid: `${describeProvider(p)}-${i}`,
+      name: describeProvider(p),
+      provider: p,
+      isSnapLikely: isMetaMaskLike(p),
+    }));
+  }
 
   function startConnect() {
-    if (wallets.length > 1) {
-      setChoosing(true);
+    const found = readWallets();
+    if (found.length > 1) {
+      setWallets(found);
+      setOpen(true);
       return;
     }
-    void connectViaSnap(wallets[0]?.provider);
+    void connectViaSnap(found[0]?.provider);
   }
+
+  /* Click outside, Escape, and a pending drawer has to close on scroll.
+     This is the part jsdom cannot test: a `position: fixed; inset: 0` backdrop
+     placed inside the sticky header (`z-index: 20`) covers the whole viewport,
+     and being in the header's stacking context it also covers the Connect button
+     itself — so the second click lands on the backdrop and the drawer appears
+     dead. jsdom has no layout, so the test suite was green against a control that
+     does not respond in a browser.
+
+     Closing on scroll matters for the same reason: the drawer is anchored to a
+     sticky header, and scrolling with it open leaves the list pointing at
+     something that has moved. */
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', () => setOpen(false), { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   if (account.address) {
     return (
-      <div className="cluster cluster--tight" style={{ position: 'relative' }}>
+      <div className="cluster cluster--tight" style={{ position: 'relative' }} ref={root}>
         <button
           type="button"
           className="btn btn--ghost btn--sm"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
+          aria-haspopup="menu"
           title={account.address}
         >
           <span className="pulse" aria-hidden="true" />
           <span className="mono">{shortAddress(account.address)}</span>
         </button>
         {open && (
-          <>
+          <div
+            className="card"
+            role="menu"
+            aria-label="Account"
+            style={{
+              position: 'absolute',
+              top: '110%',
+              right: 0,
+              minWidth: '15rem',
+              zIndex: 40,
+              background: 'var(--paper)',
+            }}
+          >
+            <p className="label" style={{ marginBottom: 'var(--s-2)' }}>
+              {account.kind === 'development' ? 'Development account' : account.label ?? 'Connected account'}
+            </p>
+            <p className="hash" style={{ wordBreak: 'break-all', marginTop: 0 }}>
+              {account.address}
+            </p>
+            <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
+              Reads never needed this. It is here to sign writes.
+            </p>
             <button
               type="button"
-              aria-label="Close account menu"
-              style={{ position: 'fixed', inset: 0, background: 'transparent', border: 0 }}
-              onClick={() => setOpen(false)}
-            />
-            <div
-              className="card"
-              style={{
-                position: 'absolute',
-                top: '110%',
-                right: 0,
-                minWidth: '15rem',
-                zIndex: 40,
-                background: 'var(--paper)',
+              className="btn btn--ghost btn--sm"
+              style={{ marginTop: 'var(--s-3)' }}
+              onClick={() => {
+                disconnect();
+                setOpen(false);
               }}
             >
-              <p className="label" style={{ marginBottom: 'var(--s-2)' }}>
-                {account.kind === 'development' ? 'Development account' : 'Connected account'}
-              </p>
-              <p className="hash" style={{ wordBreak: 'break-all', marginTop: 0 }}>
-                {account.address}
-              </p>
-              <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
-                Reads never needed this. It is here to sign writes.
-              </p>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                style={{ marginTop: 'var(--s-3)' }}
-                onClick={() => {
-                  disconnect();
-                  setOpen(false);
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-          </>
+              Disconnect
+            </button>
+          </div>
         )}
       </div>
     );
   }
 
+  const hasChoice = wallets.length > 1;
+
   return (
-    <div className="cluster cluster--tight" style={{ position: 'relative' }}>
+    <div className="cluster cluster--tight" style={{ position: 'relative' }} ref={root}>
       <button
         type="button"
         className="btn btn--ghost btn--sm"
-        onClick={() => void startConnect()}
+        onClick={() => (hasChoice && open ? setOpen(false) : startConnect())}
         disabled={account.connecting}
-        aria-haspopup={wallets.length > 1 ? 'menu' : undefined}
-        aria-expanded={wallets.length > 1 ? choosing : undefined}
+        aria-haspopup={hasChoice ? 'menu' : undefined}
+        aria-expanded={hasChoice ? open : undefined}
       >
         {account.connecting ? 'Connecting…' : 'Connect account'}
       </button>
@@ -135,55 +166,45 @@ export function AccountControl() {
         </button>
       )}
 
-      {/* More than one wallet installed: ask, rather than let the browser's
-          injection race pick. The SDK reads window.ethereum directly and would
-          otherwise connect to whichever extension registered first, with no way
-          for the user to reach the other one. */}
-      {choosing && wallets.length > 1 && (
-        <>
-          <button
-            type="button"
-            aria-label="Close wallet picker"
-            style={{ position: 'fixed', inset: 0, background: 'transparent', border: 0 }}
-            onClick={() => setChoosing(false)}
-          />
-          <div
-            className="card"
-            role="menu"
-            aria-label="Choose a wallet"
-            style={{
-              position: 'absolute',
-              top: '110%',
-              right: 0,
-              minWidth: '15rem',
-              zIndex: 40,
-              background: 'var(--paper)',
-            }}
-          >
-            <p className="label" style={{ marginBottom: 'var(--s-2)' }}>
-              Choose a wallet
-            </p>
-            {wallets.map((w) => (
-              <button
-                key={w.uid}
-                type="button"
-                role="menuitem"
-                className="btn btn--ghost btn--sm"
-                style={{ width: '100%', justifyContent: 'space-between' }}
-                onClick={() => {
-                  setChoosing(false);
-                  void connectViaSnap(w.provider);
-                }}
-              >
-                <span>{w.name}</span>
-                {w.isSnapLikely && <span className="hash">Snap supported</span>}
-              </button>
-            ))}
-            <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
-              The GenLayer Snap lives in MetaMask. Other wallets can hold and show your address.
-            </p>
-          </div>
-        </>
+      {/* No full-viewport backdrop. The drawer closes on outside click, Escape
+          and scroll instead, all handled above. */}
+      {hasChoice && open && (
+        <div
+          className="card"
+          role="menu"
+          aria-label="Choose a wallet"
+          style={{
+            position: 'absolute',
+            top: '110%',
+            right: 0,
+            minWidth: '15rem',
+            zIndex: 40,
+            background: 'var(--paper)',
+          }}
+        >
+          <p className="label" style={{ marginBottom: 'var(--s-2)' }}>
+            Choose a wallet
+          </p>
+          {wallets.map((w) => (
+            <button
+              key={w.uid}
+              type="button"
+              role="menuitem"
+              className="btn btn--ghost btn--sm"
+              style={{ width: '100%', justifyContent: 'space-between' }}
+              onClick={() => {
+                setOpen(false);
+                void connectViaSnap(w.provider);
+              }}
+            >
+              <span>{w.name}</span>
+              {w.isSnapLikely && <span className="hash">Snap supported</span>}
+            </button>
+          ))}
+          <p className="hash" style={{ marginTop: 'var(--s-3)' }}>
+            The GenLayer Snap lives in MetaMask. Other wallets can hold and show your address.
+          </p>
+        </div>
       )}
     </div>
   );

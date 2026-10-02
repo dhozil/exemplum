@@ -192,6 +192,65 @@ describe('AccountControl wallet picker', () => {
     expect(screen.getByRole('menuitem', { name: /rabby/i })).toBeInTheDocument();
   });
 
+  /* The regression that shipped: a `position: fixed; inset: 0` backdrop rendered
+     inside the sticky header covers the whole viewport, and because it sits in
+     the header's stacking context (`z-index: 20`) it also covers the Connect
+     button. The drawer opened and then swallowed every subsequent click, so the
+     control looked alive once and dead afterwards.
+
+     jsdom has no layout, so nothing here can see an overlay. What it can check is
+     the thing that actually caused it: the full-viewport backdrop must not exist
+     at all, and the button must keep receiving clicks while the drawer is open. */
+  it('has no full-viewport backdrop to swallow clicks', async () => {
+    renderWith({
+      request: (fakeWallet({ isMetaMask: true })).request,
+      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await screen.findByRole('menu', { name: /choose a wallet/i });
+
+    const fullscreen = document.querySelectorAll(
+      'button, div, span',
+    );
+    for (const el of fullscreen) {
+      const s = (el as HTMLElement).style;
+      if (s.position === 'fixed' && (s.inset === '0' || s.top === '0px')) {
+        throw new Error(
+          `a full-viewport element (${el.tagName}) would sit over the header and eat clicks`,
+        );
+      }
+    }
+  });
+
+  it('keeps accepting clicks on the button while the drawer is open', async () => {
+    renderWith({
+      request: (fakeWallet({ isMetaMask: true })).request,
+      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+    });
+
+    const button = screen.getByRole('button', { name: /connect account/i });
+    await userEvent.click(button);
+    await screen.findByRole('menu', { name: /choose a wallet/i });
+
+    // A second click must reach the button, so it can close the drawer.
+    await userEvent.click(button);
+    expect(screen.queryByRole('menu', { name: /choose a wallet/i })).not.toBeInTheDocument();
+  });
+
+  it('closes the drawer on Escape, so it is not stuck open', async () => {
+    renderWith({
+      request: (fakeWallet({ isMetaMask: true })).request,
+      providers: [fakeWallet({ isMetaMask: true }), fakeWallet({ isRabby: true })],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await screen.findByRole('menu', { name: /choose a wallet/i });
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('menu', { name: /choose a wallet/i })).not.toBeInTheDocument();
+  });
+
   it('does not connect to the injection-race winner before the user chooses', async () => {
     renderWith({
       request: (fakeWallet({ isMetaMask: true })).request,
