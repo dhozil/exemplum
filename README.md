@@ -1,45 +1,82 @@
-# Exemplum — GenLayer Intelligent Contracts
+<div align="center">
 
-> *Exemplum* is Latin for a model or specimen, and in numismatics it names the
-> coin a type is described from: the specimen kept permanently as the standard
-> every later striking is checked against. That is what an attestation here is.
-> An *exemplar* is a standard of comparison, not the thing itself — which is
-> also, deliberately, what this system claims to be.
+<img src="docs/logo.svg" alt="Exemplum" width="96" height="92">
 
-An automated notary that confirms whether an online event occurred and records a
-verifiable, tamper-evident attestation of that judgment on-chain — plus a
-settlement-decision layer that turns those attestations into a recorded payout
-obligation.
+# Exemplum
 
-**How it works:** anyone submits a **claim** plus **two or more independent
-sources**. Validators independently fetch every source, independently judge the
-claim against the content, and reach consensus on a verdict. The accepted
-verdict, the evidence quotes, the SHA-256 hash of each source's content, and the
-on-chain timestamp are stored permanently. Anyone can later challenge a record
-and force a fresh consensus evaluation against live evidence.
+**An automated notary for claims about the real world, and a settlement layer that pays out on its verdict.**
 
-A second contract, `NotarizedSettlement`, escrows an obligation, binds a
-notarization to it, and records who is owed what — refusing to bind any
-notarization that is about a different statement than the one that was escrowed.
+[![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
+[![Methods](https://img.shields.io/badge/on--chain%20methods-37-7E14FF?style=flat-square)](#api)
+[![Tests](https://img.shields.io/badge/tests-344-2E7D32?style=flat-square)](#verify)
+[![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
-This is one of GenLayer's documented use cases
-([Build With GenLayer](https://docs.genlayer.com/developers/intelligent-contracts/ideas)):
-*"Create an automated notary service that can confirm the occurrence of online
-events, providing verifiable records for various purposes."*
+[Live deployment](#deploy-the-frontend) · [How it works](#how-it-works) · [API](#api) · [Limitations](#known-limitations) · [Deploy it yourself](#deploy)
+
+</div>
 
 ---
+
+## What it does
+
+Anyone can submit a **claim** plus **two or more sources**. A committee of
+validators fetches every source independently, judges the claim against what it
+actually read, and reaches consensus on a verdict.
+
+Everything needed to audit that judgment goes on chain:
+
+| Stored | Why |
+|---|---|
+| The agreed verdict and confidence | The conclusion itself |
+| An evidence quote per source | Verbatim, checked against the fetched content |
+| SHA-256 of each source's content | What was actually read at the time |
+| Per-source verdicts | Which evidence supported, contradicted, or failed to load |
+| Revision history | What earlier rounds concluded, and when |
+| The timestamp | When consensus was reached |
+
+Any record can be **challenged** by anyone, which forces a fresh consensus round
+against live evidence. Challenges are rate-limited and cost a transaction, so the
+process cannot be flooded.
+
+## What it pays out
+
+The second contract, `NotarizedSettlement`, holds an obligation in escrow and
+binds a notarization to it. It refuses to bind any attestation that is about a
+different statement, or that was reached from a different set of sources, than
+the one that was escrowed.
+
+Once a notarization is bound, the settlement re-reads the notary's current
+verdict and pays automatically:
+
+| Verdict | Outcome |
+|---|---|
+| `confirmed` | Payee is paid |
+| `refuted` | Payer is refunded |
+| `inconclusive` | Payer is refunded |
 
 ## Why this needs GenLayer
 
 The decision is a **judgment**, not a computation. A deterministic contract
-cannot decide whether a page's release notes support the statement "version
-2.4.0 was published" — the evidence is unstructured text and the question is
-semantic. GenLayer's Optimistic Democracy gives that judgment a leader/validator
-consensus with an appeal path, which is exactly what a notary needs and what a
-normal backend cannot provide.
+cannot decide whether a page's release notes support the claim *"version 2.4.0
+was published"* — the evidence is unstructured text and the question is semantic.
 
-See [Boundary](#boundary-what-genlayer-owns-vs-what-it-doesnt) below for the
-division of responsibility.
+GenLayer's Optimistic Democracy gives that judgment a leader/validator consensus
+with an appeal path: exactly what a notary needs, and exactly what a normal
+backend cannot provide. That is the reason this is not an oracle plus a
+signature.
+
+See [Boundary](#boundary-what-genlayer-owns-vs-what-it-doesnt) for the full
+division of responsibility, including what the protocol does *not* verify.
+
+## The name
+
+*Exemplum* is Latin for a model or specimen, and in numismatics it names the coin
+a type is described from: the specimen kept permanently as the standard every
+later striking is checked against. An attestation is exactly that. An exemplar is
+a standard of comparison rather than the thing itself — which is, deliberately,
+what this system claims to be.
+
+---
 
 ## How it works
 
@@ -552,12 +589,15 @@ pip install "genlayer-test[sim]"   # optional: local GLSim
 genvm-lint check contracts/ai_notary.py
 genvm-lint check contracts/notarized_settlement.py
 
-# fast logic tests (~4s, no network, no LLM)
-python -m pytest tests/test_ai_notary.py tests/test_equivalence.py tests/test_settlement.py -q
+# contract logic, no network and no LLM (~10s)
+python -m pytest tests/ --ignore=tests/integration -q
 
 # full consensus against real GenVM (slow, real LLM inference)
 gltest tests/integration/ -v -s --network studionet     # gasless
 gltest tests/integration/ -v -s --network localnet      # needs glsim
+
+# frontend component and logic tests
+cd frontend && npm test
 
 # every on-chain method, exercised against the *test* deployment
 python D:\Genlayer-project\wallet\test_all_methods.py
@@ -569,10 +609,25 @@ python D:\Genlayer-project\wallet\prove_verdict_refresh.py
 python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 ```
 
-Current status: `genvm-lint` clean on both contracts, **199** direct-mode tests
-passing, **37 on-chain methods** deployed and verified by schema (12 notary + 25 settlement).
+| Suite | Count | Notes |
+|---|---|---|
+| Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
+| Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
+| Frontend (`vitest`) | **105** | 10 files |
+| On-chain methods | **37** | 12 notary + 25 settlement, checked against the deployed schema |
 
-The `gltest` integration suite runs against StudioNet: **23 of 23 pass**. It
+`genvm-lint` is clean on both contracts, and every one of the 37 on-chain methods
+has been called against a live deployment — the coverage audit compares what the
+script exercised against the schema the node returns, so a method added later
+without being tested shows up as a failure rather than passing silently.
+
+Six of the integration tests are **skipped on purpose**. They are the value
+transfer cases, and the `gltest` contract factory takes arguments but not value,
+so it cannot fund an escrow. The money path is covered instead by the
+`prove_*.py` scripts in the wallet repository, which move real GEN — see
+[Money moves](#money-moves-testing-it-is-what-found-out-why-it-didnt).
+
+The settlement integration suite runs against StudioNet: **23 of 23 pass**. It
 could not run at all for most of this work, and the cause turned out to be
 narrower than first recorded. **Deploying does not require ASCII source.**
 deploy_contract passes the code through serialize(), which is happy with
