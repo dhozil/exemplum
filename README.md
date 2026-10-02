@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.svg" alt="Exemplum" width="96" height="92">
+<img src="docs/logo.svg" alt="Exemplum" width="112" height="112">
 
 # Exemplum
 
