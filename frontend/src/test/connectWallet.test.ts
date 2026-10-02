@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Provider } from '../lib/chainType';
 import { connectWallet, injectedProviders, describeProvider, SNAP_ID } from '../lib/chain';
+
+type Provider = { request: (a: { method: string; params?: unknown[] | Record<string, unknown> }) => Promise<unknown> };
 import { client } from '../lib/chain';
 
 /**
@@ -97,7 +98,7 @@ describe('connectWallet', () => {
       return null;
     });
     await connectWallet(provider);
-    const calls = (provider.request as unknown as { mock: { calls: Request[] } }).mock.calls;
+    const calls = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls;
     const request = calls.find((c) => c[0].method === 'wallet_requestSnaps');
     expect(request).toBeDefined();
     expect(request![0].params).toEqual({ [SNAP_ID]: {} });
@@ -106,7 +107,7 @@ describe('connectWallet', () => {
   it('does not reinstall a Snap that is already there', async () => {
     const provider = wallet(snapInstalled());
     await connectWallet(provider);
-    const calls = (provider.request as unknown as { mock: { calls: Request[] } }).mock.calls;
+    const calls = (provider.request as unknown as { mock: { calls: [Request][] } }).mock.calls;
     expect(calls.find((c) => c[0].method === 'wallet_requestSnaps')).toBeUndefined();
   });
 
