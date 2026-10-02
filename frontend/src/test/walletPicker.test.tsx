@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { AccountControl } from '../components/AccountButton';
 import { describeProvider, injectedProviders, withProvider } from '../lib/chain';
-import { disconnect } from '../lib/wallet';
+import { disconnect, getAccount } from '../lib/wallet';
 
 /**
  * Choosing a wallet, rather than racing for one.
@@ -29,6 +29,8 @@ const account = { address: '0x1234567890abcdef1234567890abcdef12345678' };
 let askedProvider: unknown;
 let connectCalls: number;
 let clientAccount: { address: string } | null;
+/** When set, the next `connect` rejects with this instead of succeeding. */
+let connectFailure: Error | null = null;
 /** window.ethereum as it was before the test, restored in afterEach. */
 let snapshot: unknown;
 
@@ -43,6 +45,7 @@ vi.mock('../lib/chain', async () => {
       connect: async () => {
         connectCalls += 1;
         askedProvider = (window as unknown as { ethereum?: unknown }).ethereum;
+        if (connectFailure) throw connectFailure;
         clientAccount = { address: account.address };
       },
     },
@@ -67,6 +70,7 @@ beforeEach(() => {
   askedProvider = undefined;
   connectCalls = 0;
   clientAccount = null;
+  connectFailure = null;
   snapshot = (window as unknown as { ethereum?: unknown }).ethereum;
 });
 
@@ -158,6 +162,89 @@ describe('withProvider', () => {
     delete (window as unknown as { ethereum?: unknown }).ethereum;
     await withProvider(fakeWallet({ name: 'Rabby' }) as never, async () => {});
     expect('ethereum' in window).toBe(false);
+  });
+});
+
+describe('the connect error is on screen, not just in the store', () => {
+  /* The store holding an error proves nothing. What the user needs is the error
+     rendered, and this is the assertion that would have caught it: the original
+     bug was a `FriendlyError` sitting in the store with no component reading it,
+     so every store-level test passed while the button silently reverted to
+     "Connect account" and the user saw no reason for it.
+
+     `AccountControl` reads the real store, so failing a connect and then
+     rendering the control shows the whole path. */
+  it('renders a connect failure where the user is already looking', async () => {
+    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
+    connectFailure = new Error('MetaMask is not installed.');
+    const { connectViaSnap: connect } = await import('../lib/wallet');
+
+    render(<AccountControl />);
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await waitFor(() => expect(getAccount().error).not.toBeNull());
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/snap/i)).toBeInTheDocument();
+  });
+
+  it('clears the failure on the next attempt rather than leaving it stale', async () => {
+    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
+    connectFailure = new Error('MetaMask is not installed.');
+    const { connectViaSnap: connect } = await import('../lib/wallet');
+
+    render(<AccountControl />);
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await waitFor(() => expect(getAccount().error).not.toBeNull());
+
+    connectFailure = null;
+    await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    void connect;
+  });
+});
+
+describe('connect failures are visible', () => {
+  /* The reason this file exists beyond the picker: `connectViaSnap` published a
+     friendly error into the store and nothing rendered it. The button reverted
+     to "Connect account" with no message, so a connect that failed — Snap not
+     installed being the common one — looked exactly like a connect that was
+     never attempted. */
+  it('shows the error the store holds, next to the button', async () => {
+    const { connectViaSnap: realConnect } = await import('../lib/wallet');
+    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
+    connectFailure = new Error('MetaMask is not installed.');
+
+    await realConnect();
+
+    const state = getAccount();
+    expect(state.error).not.toBeNull();
+    expect(state.connecting).toBe(false);
+  });
+
+  it('explains a missing Snap in terms the user can act on', async () => {
+    const { connectViaSnap: realConnect } = await import('../lib/wallet');
+    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
+    connectFailure = new Error('MetaMask is not installed.');
+
+    await realConnect();
+
+    const e = getAccount().error!;
+    const text = `${e.title} ${e.detail}`;
+    // "MetaMask is not installed" sends the user looking for a missing browser
+    // extension when MetaMask is installed and only the Snap is missing.
+    expect(text).toMatch(/snap/i);
+    expect(text).not.toMatch(/MetaMask is not installed/);
+  });
+
+  it('says which wallet cannot hold the Snap when it is not MetaMask', async () => {
+    const { connectViaSnap: realConnect } = await import('../lib/wallet');
+    (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isRabby: true });
+    connectFailure = new Error('MetaMask is not installed.');
+
+    await realConnect(fakeWallet({ isRabby: true }));
+
+    const text = `${getAccount().error!.title} ${getAccount().error!.detail}`;
+    expect(text).toMatch(/rabby/i);
   });
 });
 

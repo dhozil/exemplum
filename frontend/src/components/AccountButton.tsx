@@ -7,12 +7,40 @@ import {
   useAccount,
 } from '../lib/wallet';
 import { describeProvider, injectedProviders } from '../lib/chain';
+import type { FriendlyError } from '../lib/errors';
 import { shortAddress } from '../lib/format';
 
 /** Whether a wallet looks like it can install the Snap, read from its own flags. */
 function isMetaMaskLike(provider: unknown): boolean {
   const p = provider as { isMetaMask?: boolean };
   return Boolean(p?.isMetaMask);
+}
+
+/**
+ * The connect failure, shown next to the button that caused it.
+ *
+ * This was rendering nowhere. `connectViaSnap` publishes a friendly error into
+ * the store, and the button just reverts to "Connect account" — so a connect that
+ * failed looked identical to a connect that was never attempted. Worse, the
+ * common failure is the Snap not being installed, which needs the user to act
+ * inside MetaMask, and the only way to tell them that is to say it.
+ *
+ * `role="alert"` because it arrives as the direct result of a click: it is the
+ * answer to that action, and a screen reader should announce it without having to
+ * go looking for it.
+ */
+function AccountError({ error }: { error: FriendlyError | null }) {
+  if (!error) return null;
+  return (
+    <div
+      className={`notice notice--${error.tone === 'info' ? 'info' : error.tone}`}
+      role="alert"
+      style={{ maxWidth: '22rem', marginTop: 'var(--s-2)' }}
+    >
+      <p className="notice__title">{error.title}</p>
+      {error.detail && <p className="notice__body">{error.detail}</p>}
+    </div>
+  );
 }
 
 /**
@@ -88,6 +116,7 @@ export function AccountControl() {
   if (account.address) {
     return (
       <div className="cluster cluster--tight" style={{ position: 'relative' }} ref={root}>
+        <AccountError error={account.error} />
         <button
           type="button"
           className="btn btn--ghost btn--sm"
@@ -142,7 +171,11 @@ export function AccountControl() {
   const hasChoice = wallets.length > 1;
 
   return (
-    <div className="cluster cluster--tight" style={{ position: 'relative' }} ref={root}>
+    <div
+      className="cluster cluster--tight"
+      style={{ position: 'relative', flexWrap: 'wrap' }}
+      ref={root}
+    >
       <button
         type="button"
         className="btn btn--ghost btn--sm"
@@ -165,6 +198,8 @@ export function AccountControl() {
           Dev account
         </button>
       )}
+
+      <AccountError error={account.error} />
 
       {/* No full-viewport backdrop. The drawer closes on outside click, Escape
           and scroll instead, all handled above. */}

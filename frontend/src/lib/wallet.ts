@@ -163,22 +163,25 @@ export async function connectViaSnap(provider?: unknown): Promise<void> {
 }
 
 /**
- * Make the SDK's failure name the wallet the user actually chose.
+ * Make the SDK's failure name the wallet the user actually chose, and say what
+ * to do about it.
  *
- * A non-MetaMask wallet answers `wallet_getSnaps` with "method not found", and
- * the SDK reports that as "MetaMask is not installed" — which reads as a missing
- * extension when MetaMask is installed and the user simply picked the other one.
- * The label is also kept in the state, so the account menu says which wallet it
- * is rather than always saying MetaMask.
+ * The SDK reports a missing Snap as "MetaMask is not installed", which is wrong
+ * twice over: MetaMask usually *is* installed, and the real gap is the GenLayer
+ * Snap inside it. A user who reads that goes looking for a missing extension
+ * instead of installing a Snap, so the message is replaced rather than echoed.
+ *
+ * The Snap id is repeated here because the SDK does not export it and the user
+ * has to be able to act on the name.
  */
 function snapError(err: unknown): Error {
   const message = String(err instanceof Error ? err.message : err);
-  const label = current.label ?? (chosenProvider() ? describeProvider(chosenProvider()!) : null);
+  const label = chosenProvider() ? describeProvider(chosenProvider()!) : null;
   if (/MetaMask is not installed/i.test(message)) {
     return new Error(
-      label
-        ? `${label} does not support the GenLayer Snap. The Snap needs MetaMask — install the GenLayer Snap there, or use a browser wallet that supports it.`
-        : 'The GenLayer Snap needs MetaMask. Install the GenLayer Snap in MetaMask, then connect again.',
+      label && !/metamask/i.test(label)
+        ? `${label} cannot hold the GenLayer Snap — the Snap only exists in MetaMask. Open MetaMask and connect there, or use the development account.`
+        : 'The GenLayer Snap is not installed in MetaMask. Open MetaMask, allow this site, and choose "Install Snap" when prompted, then connect again.',
     );
   }
   return err instanceof Error ? err : new Error(message);
