@@ -177,7 +177,6 @@ describe('the connect error is on screen, not just in the store', () => {
   it('renders a connect failure where the user is already looking', async () => {
     (window as unknown as { ethereum?: unknown }).ethereum = fakeWallet({ isMetaMask: true });
     connectFailure = new Error('MetaMask is not installed.');
-    const { connectViaSnap: connect } = await import('../lib/wallet');
 
     render(<AccountControl />);
     await userEvent.click(screen.getByRole('button', { name: /connect account/i }));
