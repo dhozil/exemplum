@@ -17,10 +17,12 @@ import type { NotarizationRecord } from '../lib/types';
  * that is what is shown: the agreed verdict first, then why, then the evidence
  * each judgement rests on.
  *
- * `honesty` matters here more than presentation. Validators compare the verdict,
- * confidence and quote — never the wording of the reason. So the reasoning below
- * is one committee's prose, not something the protocol verified. Saying so is the
- * point of labelling it at all.
+ * `honesty` matters here more than presentation. The equivalence check compares
+ * the verdict, the confidence and the corroboration/contradiction counts — never
+ * the wording of the reason, and never the excerpt itself. So the reasoning
+ * below is one committee's prose, and so is each quoted excerpt: they are shown
+ * as the committee's record of what it saw, not as anything the protocol
+ * verified. Saying so is the point of labelling them at all.
  */
 export function EquivalenceOutput({
   record,
@@ -67,9 +69,9 @@ export function EquivalenceOutput({
 
       <p className="hash" style={{ marginBottom: 'var(--s-4)' }}>
         A leader read each source and proposed a verdict; validators fetched the same pages independently
-        and re-decided. Agreement is reached on the verdict, the confidence and the excerpt — not on this
-        wording, which is one committee&rsquo;s account of its own reasoning and is shown as their record,
-        not as something the protocol verified.
+        and re-decided. The equivalence check compares the verdict, the confidence and the
+        corroboration counts — not the wording above, and not the excerpts below, which are one
+        committee&rsquo;s record of what it read rather than something the protocol verified.
       </p>
 
       {showEvidence && sources.length > 0 && (

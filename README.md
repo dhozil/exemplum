@@ -7,8 +7,8 @@
 **An automated notary for claims about the real world, and a settlement layer that pays out on its verdict.**
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
-[![Methods](https://img.shields.io/badge/on--chain%20methods-37-7E14FF?style=flat-square)](#api)
-[![Tests](https://img.shields.io/badge/tests-349-2E7D32?style=flat-square)](#verify)
+[![Methods](https://img.shields.io/badge/on--chain%20methods-42-7E14FF?style=flat-square)](#api)
+[![Tests](https://img.shields.io/badge/tests-383-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
 [Live deployment](#deploy-the-frontend) · [How it works](#how-it-works) · [API](#api) · [Limitations](#known-limitations) · [Deploy it yourself](#deploy)
@@ -25,14 +25,23 @@ actually read, and reaches consensus on a verdict.
 
 Everything needed to audit that judgment goes on chain:
 
-| Stored | Why |
-|---|---|
-| The agreed verdict and confidence | The conclusion itself |
-| An evidence quote per source | Verbatim, checked against the fetched content |
-| SHA-256 of each source's content | What was actually read at the time |
-| Per-source verdicts | Which evidence supported, contradicted, or failed to load |
-| Revision history | What earlier rounds concluded, and when |
-| The timestamp | When consensus was reached |
+| Stored | Why | Consensus-bound? |
+|---|---|---|
+| The agreed verdict and confidence | The conclusion itself | **Yes** |
+| Corroboration / contradiction counts | How many sources agreed with each other | **Yes**, within tolerance |
+| An evidence quote per source | The committee's record of what it read | No — leader-written prose |
+| SHA-256 of each source's content | What was actually read at the time | No — leader-reported |
+| Per-source verdicts | Which evidence supported, contradicted, or failed to load | No — leader-written |
+| Revision history | What earlier rounds concluded, and when | Yes, per revision |
+| The timestamp | When consensus was reached | Yes |
+
+That third column is the honest part, and it is not decoration. The equivalence
+check in `validator_fn` compares four things — verdict, confidence,
+corroboration, contradiction — and returns false if any differ. It never looks at
+the quote, the reasoning or the content hash. So a record proves *that the
+committee concluded this*, and shows you *what it says it read*; it does not prove
+the excerpt was in the page. Treat the quote as a pointer to verify, not as
+verified text.
 
 Any record can be **challenged** by anyone, which forces a fresh consensus round
 against live evidence. Challenges are rate-limited and cost a transaction, so the
@@ -212,12 +221,16 @@ notarization is a historical fact, while the live assessment may change.
 | `fund_settlement(escrow_id)` | Top an escrow up. Payable. Rejected once settled. |
 | `attach_notarization(escrow_id, record_id) -> str` | Bind a notarization after the claim/source checks. |
 | `refresh_verdict(escrow_id) -> str` | Re-read the bound record and re-derive the outcome. |
-| `settle(escrow_id) -> str` | Record the payout decision. |
+| `settle(escrow_id) -> str` | Record the decision. Requests a transfer; does **not** mark it paid. |
+| `confirm_payout(escrow_id) -> str` | Mark a payout delivered, once its funds are seen to have left. |
+| `recover_payout(escrow_id) -> str` | Return an undelivered payout to `owed`. Refused inside the grace period. |
+| `retry_payout(escrow_id) -> str` | Beneficiary-only. Resend a recovered payout. |
 | `challenge(escrow_id, reason)` | Push a challenge to the underlying notarization. |
 | `request_reevaluation(escrow_id)` | Ask the notary to re-run consensus. |
 | `set_notary_trust(notary, active, label) -> str` | Owner-only. Add to or update the trust list. |
 | `revoke_notary_trust(notary)` | Owner-only. Revoke a notary. |
 | `set_trust_warmup_hours(hours) -> u256` | Owner-only. Warm-up before a notary becomes usable. |
+| `set_payout_grace_seconds(seconds) -> u256` | Owner-only. How long a payout must be left alone before it may be judged. |
 | `set_paused(new_paused)` | Owner-only emergency stop. |
 
 Payouts go to the beneficiary's **chain-layer** address through the contract's
@@ -226,13 +239,18 @@ ghost contract (`_Recipient`, an `@gl.evm.contract_interface`), never via
 the internal form loses the value while reporting success — see
 [Money moves](#money-moves-testing-it-is-what-found-out-why-it-didnt).
 
+`settle` deciding and the money arriving are two separate facts, and the contract
+can only ever observe the second one some time *after* it asks for it — see
+[Decided is not paid](#decided-is-not-paid-the-delivery-reconciliation).
+
 ### `NotarizedSettlement` — view
 
 | Method | Description |
 |---|---|
 | `get_settlement(escrow_id) -> dict` | Full record, includes `received`, `fully_funded`, `notary_trusted_since`. |
 | `get_settlements_paginated(offset, limit)` | JSON rows, `limit` capped at 50. |
-| `get_pending_payouts(offset, limit)` | Funded, settled obligations for the settler. |
+| `get_pending_payouts(offset, limit)` | Funded, settled obligations still `owed` or `sent`. |
+| `get_payout_state(escrow_id) -> dict` | Delivery status, attempt count, grace countdown. |
 | `get_stats() -> dict` | O(1) tallies. |
 | `get_contract_balance() -> u256` | In-protocol balance. |
 | `get_notary_trust(notary) -> dict` | Trust state, age, warm-up, and readiness. |
@@ -494,6 +512,76 @@ escrow failing to settle. Now gated on `s.received >= s.amount`.
 Both are covered by `tests/integration/test_value_transfer.py`, which spends real
 GEN and asserts the payee's chain-layer balance actually moves.
 
+### Decided is not paid. The delivery reconciliation.
+
+The bug above delivered nothing and reported success. **The reconciliation below
+is what stops that from being invisible** — and it came out of the same review,
+because fixing bug 1 alone still left `settle` lying about the outcome.
+
+`settle` used to call `emit_transfer`, set `transfer_emitted = true` and
+increment `total_paid_out`, all in the same transaction. But `on="finalized"`
+means the child transaction carrying the value **is created after the parent
+finalizes**. So at the moment `settle` returned, no money had moved and no child
+existed. Three writes asserted a delivery that had not happened:
+
+- the escrow read as settled *and* paid;
+- it left `get_pending_payouts()`, so nothing was looking for it any more;
+- if the child then errored, its value came back through the inherited
+  `__on_errored_message__` with **no route out**. Unreachable money.
+
+The decision and the delivery are now separate state machines.
+
+| `payout_state` | Means | Who moves it |
+|---|---|---|
+| `''` | No verdict yet | — |
+| `owed` | Decided, money still this contract's problem, nothing sent | `settle`, `recover_payout` |
+| `sent` | Transfer requested, not yet observed to land | `settle`, `retry_payout` |
+| `delivered` | Funds seen to have left the balance | `confirm_payout` |
+
+`total_paid_out` moves **only** in `confirm_payout`, never in `settle`. That is
+the trade: the paid figure now lags reality until somebody reconciles, in
+exchange for never having claimed a payment that did not happen.
+
+Reconciliation judges from the contract's own balance against a snapshot taken
+immediately before the emit. That is arithmetic, not a claim by the caller, so
+both methods are permissionless — `confirm_payout` can only ever *reduce*
+exposure.
+
+**Two guards make the balance reading trustworthy.** Without them it is worse
+than the original bug, because it would authorize a second payment:
+
+**1. One payout in flight at a time.** Every escrow shares a single balance, so a
+drop in it cannot be attributed to one of two simultaneous transfers. If a second
+funded escrow settles while one is un-reconciled, it stays `owed` — the decision
+stands, the send is deferred, and the obligation is still listed.
+
+**2. A grace period, one hour by default.** Until a child resolves, "the balance
+is back where it started" means two things at once, and they point opposite ways:
+
+| Reading | Correct action |
+|---|---|
+| still in flight | do nothing, or the original transfer lands too and the payee is paid twice |
+| failed, value returned | recover, or the money is stranded in the contract forever |
+
+Waiting is the only thing that separates them, and a failed transfer hands its
+value back within seconds, so after the window the only reading left is "it never
+left". `recover_payout` refuses inside the window and says how long is left.
+
+This does not *prove* the child resolved, and the honest version should not claim
+it does. It makes an unresolved child implausible rather than merely possible,
+which is the right side to err on when the alternative is a double payment. It is
+owner-settable (`set_payout_grace_seconds`) because how fast a network resolves
+children is not knowable at compile time — unlike `trust_warmup_hours`, lowering it
+*does* re-open the race, so it is not a convenience knob.
+
+`retry_payout` is beneficiary-only. It is their money, so nobody else has a reason
+to be able to trigger it, and the gate costs nothing in practice.
+
+Covered by `tests/integration/test_payout_reconciliation.py` (live GEN, real child
+transactions) and by the precondition tests in `tests/test_settlement.py` — the
+direct harness does not credit a contract's balance, so the arithmetic itself can
+only be exercised against a real network.
+
 > **A real limitation, and a correction.** GEN sent with a call that *reverts*
 > stays in the contract. Measured, not inferred: a `open_settlement` carrying
 > 1 GEN that rolled back with "notary is not on the trust list" left
@@ -551,12 +639,12 @@ GEN and asserts the payee's chain-layer balance actually moves.
 
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
-contracts/notarized_settlement.py           25 methods  – escrow, trust list, settlement decision
+contracts/notarized_settlement.py           30 methods  – escrow, trust list, settlement decision, payout reconciliation
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     97 direct-mode tests
-tests/integration/.                          40 tests against real GenVM
-frontend/.                                   React dApp for both contracts (105 component/logic tests)
+tests/test_settlement.py                     109 direct-mode tests
+tests/integration/.                          53 tests against real GenVM
+frontend/.                                   React dApp for both contracts (119 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
 
@@ -614,9 +702,9 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 | Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
 | Frontend (`vitest`) | **110** | 11 files |
-| On-chain methods | **37** | 12 notary + 25 settlement, checked against the deployed schema |
+| On-chain methods | **42** | 12 notary + 30 settlement, checked against the deployed schema |
 
-`genvm-lint` is clean on both contracts, and every one of the 37 on-chain methods
+`genvm-lint` is clean on both contracts, and every one of the 42 on-chain methods
 has been called against a live deployment — the coverage audit compares what the
 script exercised against the schema the node returns, so a method added later
 without being tested shows up as a failure rather than passing silently.
@@ -662,17 +750,24 @@ genlayer schema <address>             # confirm all methods are exposed
 
 ### Current deployment
 
-GenLayer StudioNet, used by the frontend and the seeded demo data:
+GenLayer StudioNet. **These addresses predate the payout-reconciliation fix** —
+the settlement pair below is the 25-method version, which marked a transfer paid
+on the strength of having called `emit_transfer`. Redeploying is the only way to
+pick up `confirm_payout` / `recover_payout` / `retry_payout`, since Intelligent
+Contracts cannot be upgraded; the addresses and the schema coverage here get
+replaced when that happens.
 
 | Contract | Address | Purpose |
 |---|---|---|
 | `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — curated records, what the frontend reads |
-| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods |
+| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **pre-reconciliation** |
 | `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** | |
+| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — same, **pre-reconciliation** |
 
-Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint`
-exactly. The stale-verdict fix is proven against real GenVM by
+Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint` exactly
+at the time of deployment. Current source is 12 and **30**; the five-method gap is
+the reconciliation surface described above, which is lint-clean and covered by
+tests but not yet deployed. The stale-verdict fix is proven against real GenVM by
 `D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the money path by
 `probe_value_transfer.py` (real GEN, both directions of the payout).
 

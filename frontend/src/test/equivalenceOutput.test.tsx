@@ -66,12 +66,23 @@ describe('EquivalenceOutput', () => {
     expect(screen.getByText(/equivalence principle output/i)).toBeInTheDocument();
   });
 
-  /* Validators agree on verdict, confidence and quote — never on the wording of
-     the reasoning. Rendering it as though the protocol checked the prose would be
-     the one thing more dishonest than omitting it. */
-  it('says the reasoning was not itself verified', () => {
+  /* The equivalence check compares verdict, confidence and the
+     corroboration/contradiction counts. It does not compare the reasoning or the
+     excerpt — `validator_fn` in contracts/ai_notary.py reads exactly those four
+     things and nothing else. So rendering the prose or the quote as though the
+     protocol checked it would be the one thing more dishonest than omitting it.
+     The previous copy claimed the excerpt was agreed on, which is false. */
+  it('says the reasoning and the excerpts were not themselves verified', () => {
     render(<EquivalenceOutput record={BASE} />);
-    expect(screen.getByText(/not on this\s+wording|not something the protocol verified/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/not the wording above, and not the excerpts below/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does not claim the excerpt reached agreement', () => {
+    render(<EquivalenceOutput record={BASE} />);
+    // The old sentence. It reads exactly like "the committee agreed on the quote".
+    expect(screen.queryByText(/Agreement is reached on the verdict/i)).toBeNull();
   });
 
   it('reports how many sources were actually read', () => {

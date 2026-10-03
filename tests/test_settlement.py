@@ -1144,5 +1144,125 @@ def test_contract_source_declares_a_pinned_runner():
     assert len(pinned) == 1, f"contracts pin different runners: {versions}"
 
 
+# --- payout delivery reconciliation ----------------------------------------
+#
+# What can and cannot be proven here.
+#
+# The reconciliation methods decide on `self.balance`, and the direct harness
+# does not credit a contract's own balance - `test_contract_balance_is_readable`
+# above documents that. Direct mode can therefore prove the *preconditions* and
+# the refusals, which is where the money is at stake, and the balance arithmetic
+# itself is exercised on a real network in
+# tests/integration/test_payout_reconciliation.py.
+#
+# Reaching a settled escrow needs a live AINotary to read a verdict from, which
+# direct mode cannot supply either: `gl.get_contract_at` is not in the stubbed
+# module. So these tests stop at `attested`.
+
+def test_a_fresh_escrow_owes_nobody(settlement, addrs, trusted):
+    """No decision yet, so no payout lifecycle has started."""
+    escrow_id = open_one(settlement, addrs)
+
+    state = settlement.get_payout_state(escrow_id)
+    assert state["payout_state"] == ""
+    assert state["attempts"] == 0
+    assert state["delivered"] is False
+    assert state["recoverable"] is False
+    assert state["unreconciled_payouts"] == 0
+
+
+def test_the_grace_period_defaults_to_an_hour(settlement, addrs, trusted):
+    """Not a formality: it is what stops an in-flight child being read as a
+    failed one and paid a second time."""
+    escrow_id = open_one(settlement, addrs)
+
+    assert settlement.get_payout_state(escrow_id)["grace_seconds"] == 3600
+
+
+def test_the_owner_can_move_the_grace_period(settlement, addrs, trusted, direct_accounts):
+    assert settlement.set_payout_grace_seconds(0) == 0
+    assert settlement.get_payout_state(open_one(settlement, addrs))["grace_seconds"] == 0
+
+
+def test_the_grace_period_is_bounded(settlement, addrs, trusted):
+    with pytest.raises(Exception) as exc:
+        settlement.set_payout_grace_seconds(7 * 24 * 3600 + 1)
+    assert "grace must be 0..604800" in str(exc.value)
+
+
+def test_a_stranger_cannot_move_the_grace_period(settlement, addrs, trusted, direct_vm):
+    """It gates when money may be judged delivered, so it is owner-only.
+
+    A stranger who could set it to zero could turn the in-flight/failed
+    ambiguity into a licence to pay the same escrow twice.
+    """
+    direct_vm.sender = addrs[7]
+    with pytest.raises(Exception) as exc:
+        settlement.set_payout_grace_seconds(0)
+    assert "Only owner" in str(exc.value)
+
+
+def test_an_open_escrow_has_no_payout_to_confirm(settlement, addrs, trusted):
+    """`confirm_payout` must not mark a request that was never made as paid."""
+    escrow_id = open_one(settlement, addrs)
+
+    with pytest.raises(Exception) as exc:
+        settlement.confirm_payout(escrow_id)
+    assert "no payout awaiting confirmation" in str(exc.value)
+
+
+def test_an_open_escrow_has_no_payout_to_recover(settlement, addrs, trusted):
+    escrow_id = open_one(settlement, addrs)
+
+    with pytest.raises(Exception) as exc:
+        settlement.recover_payout(escrow_id)
+    assert "no payout awaiting recovery" in str(exc.value)
+
+
+def test_an_open_escrow_cannot_be_retried(settlement, addrs, trusted):
+    """Retry exists for a settled escrow whose transfer came back. An open one
+    has no decision to pay out on."""
+    escrow_id = open_one(settlement, addrs)
+
+    with pytest.raises(Exception) as exc:
+        settlement.retry_payout(escrow_id)
+    assert "is not settled" in str(exc.value)
+
+
+def test_payout_views_reject_an_unknown_escrow(settlement, addrs, trusted):
+    with pytest.raises(Exception):
+        settlement.get_payout_state(4242)
+
+
+def test_pending_payouts_is_empty_on_a_fresh_contract(settlement, addrs, trusted):
+    """Nothing is decided, so nobody is owed anything.
+
+    The counterpart to the steward finding: reconciliation is only useful if the
+    pending list is still a list of real obligations.
+    """
+    assert settlement.get_pending_payouts(0, 50) == []
+
+
+def test_a_funded_but_undecided_escrow_is_not_pending(settlement, addrs, direct_vm, trusted):
+    """Money in the contract is not an obligation. Listing this would invite a
+    settler to pay out before any verdict exists."""
+    escrow_id = open_one(settlement, addrs)
+    fund(settlement, addrs, direct_vm, escrow_id, AMOUNT)
+
+    assert settlement.get_settlement(escrow_id)["fully_funded"] is True
+    assert settlement.get_pending_payouts(0, 50) == []
+
+
+def test_the_settlement_view_carries_the_delivery_fields(settlement, addrs, trusted):
+    """`transfer_emitted` alone is the field that lied, so the delivery
+    lifecycle has to be readable from the same view a client already calls."""
+    escrow_id = open_one(settlement, addrs)
+
+    s = settlement.get_settlement(escrow_id)
+    assert s["payout_state"] == ""
+    assert s["payout_attempts"] == 0
+    assert s["payout_sent_at"] == ""
+
+
 import re  # noqa: E402  used by the tests above
 

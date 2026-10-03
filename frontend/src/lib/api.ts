@@ -17,6 +17,7 @@ import type {
   NotarizationRecord,
   NotaryTrust,
   PendingPayout,
+  PayoutStatus,
   RecordSummary,
   Settlement,
   SettlementStats,
@@ -245,6 +246,33 @@ export const setNotaryTrust = (
 
 export const setTrustWarmup = (hours: number, opts: WriteOpts = {}): Promise<Hex> =>
   write(SETTLEMENT, 'set_trust_warmup_hours', [hours], opts.account, opts.leaderOnly ?? false);
+
+/* ------------------------------------------------- payout reconciliation ---
+ *
+ * `settle` records that a transfer was *requested*; these three reconcile what
+ * actually happened to the money. The contract cannot observe its own child
+ * transaction, so it judges from its balance, and that is only trustworthy once
+ * the grace period has passed and no other payout is outstanding. */
+
+export const getPayoutState = (escrowId: number): Promise<PayoutStatus> =>
+  read<PayoutStatus>(SETTLEMENT, 'get_payout_state', [escrowId]);
+
+/** Mark a payout delivered, once its funds are seen to have left. */
+export const confirmPayout = (escrowId: number, opts: WriteOpts = {}): Promise<Hex> =>
+  write(SETTLEMENT, 'confirm_payout', [escrowId], opts.account, opts.leaderOnly ?? false);
+
+/** Put an undelivered payout back in play. Refused inside the grace period,
+ *  because "still in flight" and "failed and returned" look identical there. */
+export const recoverPayout = (escrowId: number, opts: WriteOpts = {}): Promise<Hex> =>
+  write(SETTLEMENT, 'recover_payout', [escrowId], opts.account, opts.leaderOnly ?? false);
+
+/** Resend a recovered payout. Beneficiary-only: it is their money, so nobody
+ *  else has a reason to be able to trigger it. */
+export const retryPayout = (escrowId: number, opts: WriteOpts = {}): Promise<Hex> =>
+  write(SETTLEMENT, 'retry_payout', [escrowId], opts.account, opts.leaderOnly ?? false);
+
+export const setPayoutGrace = (seconds: number, opts: WriteOpts = {}): Promise<Hex> =>
+  write(SETTLEMENT, 'set_payout_grace_seconds', [seconds], opts.account, opts.leaderOnly ?? false);
 
 export const setPaused = (
   target: 'notary' | 'settlement',

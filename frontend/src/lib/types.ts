@@ -62,6 +62,44 @@ export type SettlementState = 'open' | 'attested' | 'settled';
 
 export type Outcome = 'none' | 'pay_worker' | 'refund_payer';
 
+/** Where an escrow's money actually is.
+ *
+ *  `''`      no verdict yet, so no payout lifecycle has started
+ *  `owed`    the decision is final and the money is this contract's problem,
+ *            but nothing has been sent (or a previous attempt came back)
+ *  `sent`    a transfer was requested and has not been observed to land
+ *  `delivered` the funds were seen to leave the contract's balance
+ *
+ * This is deliberately not `SettlementState`. That one is the commercial
+ * decision and is final when it is made; this one is a fact about value, which
+ * the contract cannot observe at the moment it asks for the transfer.
+ */
+export type PayoutState = '' | 'owed' | 'sent' | 'delivered';
+
+/** Delivery status for one escrow's payout. */
+export interface PayoutStatus {
+  payout_state: PayoutState;
+  attempts: number;
+  received: number;
+  delivered: boolean;
+  balance_at_emit: number;
+  /** The contract's own receipts at the moment of the emit. Delivery is judged
+   *  net of anything received since, so a later top-up cannot make a delivered
+   *  payout look undelivered. */
+  received_at_emit: number;
+  contract_balance: number;
+  /** When the current attempt was emitted, or `''` if none is outstanding. */
+  sent_at: string;
+  sent_seconds_ago: number;
+  /** True only once the grace period has passed *and* the funds are back. */
+  recoverable: boolean;
+  /** How long until recovery is allowed. 0 when it is allowed or irrelevant. */
+  recoverable_in_seconds: number;
+  /** How many payouts this contract has awaiting reconciliation. */
+  unreconciled_payouts: number;
+  grace_seconds: number;
+}
+
 export interface Settlement {
   escrow_id: number;
   payer: string;
@@ -83,7 +121,13 @@ export interface Settlement {
   created_at: string;
   deadline: string;
   settled_at: string;
+  /** That a transfer was *requested*. Not evidence anyone was paid - see
+   *  `payout_state`, which is the one the contract will only advance on
+   *  having observed the money leave. */
   transfer_emitted: boolean;
+  payout_state: PayoutState;
+  payout_attempts: number;
+  payout_sent_at: string;
   challenge_count: number;
   notary_trusted_since: string;
   /** The notary's revision this escrow last took a verdict from. */
@@ -167,6 +211,12 @@ export interface PendingPayout {
   amount: number;
   outcome: Outcome;
   settled_at: string;
+  /** `owed` or `sent`. A `sent` row still owes the contract attention: the
+   *  transfer was requested but has not been observed to land. */
+  payout_state: PayoutState;
+  /** Present on `sent` rows only. */
+  sent_at?: string;
+  attempts?: number;
 }
 
 /** One row of the on-chain evidence ledger: what a given revision relied on. */

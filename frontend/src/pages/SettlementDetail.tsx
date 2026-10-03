@@ -3,19 +3,29 @@ import { Link, useParams } from 'react-router-dom';
 import {
   attachNotarization,
   checkBinding,
+  confirmPayout,
   getRecord,
+  getPayoutState,
   getSettlement,
   fundSettlement,
   getVerdictFreshness,
+  recoverPayout,
   refreshVerdict,
   requestReevaluation,
+  retryPayout,
   settle,
 } from '../lib/api';
 import { useQuery } from '../lib/useQuery';
 import { useTx } from '../lib/useTx';
 import { signer, useAccount } from '../lib/wallet';
 import { formatDateTime, formatGen, isPast, pluralise, relativeTo } from '../lib/format';
-import type { BindingCheck, NotarizationRecord, Settlement, VerdictFreshness } from '../lib/types';
+import type {
+  BindingCheck,
+  NotarizationRecord,
+  PayoutStatus,
+  Settlement,
+  VerdictFreshness,
+} from '../lib/types';
 import {
   ConfidenceMeter,
   EmptyState,
@@ -107,9 +117,9 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
   const [topUpAmount, setTopUpAmount] = useState<bigint>(() =>
     gap > 0n ? (gap > TEN_GEN ? TEN_GEN : gap) : 0n,
   );
-  const [pending, setPending] = useState<'attach' | 'settle' | 'refresh' | 'reval' | 'fund' | null>(
-    null,
-  );
+  const [pending, setPending] = useState<
+    'attach' | 'settle' | 'refresh' | 'reval' | 'fund' | 'payout' | null
+  >(null);
 
   async function doFundTopUp() {
     if (topUpAmount <= 0n) return;
@@ -167,6 +177,17 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
       // the staleness card only ever showed what was true at page load, which is
       // the exact thing it exists to tell someone.
       { enabled: s.state === 'attested', pollMs: 8000 },
+    );
+
+    /* Delivery status, polled for the same reason `freshness` is. An emitted
+       transfer resolves on its own schedule and then waits for somebody to
+       reconcile it, so the honest reading changes without anyone touching this
+       page. It is only fetched once a payout lifecycle exists, because before
+       the decision there is nothing to reconcile and the view would just say so. */
+    const payout = useQuery<PayoutStatus | null>(
+      () => (s.payout_state ? getPayoutState(s.escrow_id) : Promise.resolve(null)),
+      [s.escrow_id, s.payout_state],
+      { enabled: s.payout_state !== '' && s.state === 'settled', pollMs: 8000 },
     );
 
 
@@ -262,6 +283,56 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
       action: 'Settle',
       onSuccess: () => {
         toast.push('Settlement decided', 'The outcome is on chain.', 'success');
+        setPending(null);
+        reset();
+      },
+    });
+    setPending(null);
+  }
+
+  async function doConfirmPayout() {
+    const accountSigner = await signer();
+    setPending('payout');
+    await submit(() => confirmPayout(s.escrow_id, { account: accountSigner }), {
+      action: 'Confirm payout',
+      onSuccess: () => {
+        toast.push(
+          'Payout confirmed',
+          'The funds were seen to leave the contract, so this escrow is marked paid.',
+          'success',
+        );
+        setPending(null);
+        reset();
+      },
+    });
+    setPending(null);
+  }
+
+  async function doRecoverPayout() {
+    const accountSigner = await signer();
+    setPending('payout');
+    await submit(() => recoverPayout(s.escrow_id, { account: accountSigner }), {
+      action: 'Recover payout',
+      onSuccess: () => {
+        toast.push(
+          'Payout recovered',
+          'The transfer did not land, so the obligation is back in play. It can be resent.',
+          'success',
+        );
+        setPending(null);
+        reset();
+      },
+    });
+    setPending(null);
+  }
+
+  async function doRetryPayout() {
+    const accountSigner = await signer();
+    setPending('payout');
+    await submit(() => retryPayout(s.escrow_id, { account: accountSigner }), {
+      action: 'Retry payout',
+      onSuccess: () => {
+        toast.push('Payout resent', 'A second attempt is on chain.', 'success');
         setPending(null);
         reset();
       },
@@ -581,17 +652,15 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
             )}
 
             {s.state === 'settled' && (
-              <div className="notice notice--info">
-                <p className="notice__title">Decided: {s.outcome.replace('_', ' ')}</p>
-                <p className="notice__body">
-                  Settled {formatDateTime(s.settled_at)}
-                  {!s.transfer_emitted && !s.fully_funded
-                    ? '. No payout was queued, because nothing was collected in protocol.'
-                    : s.transfer_emitted
-                      ? '. The transfer was emitted on chain.'
-                      : '. The obligation is queued for the settler.'}
-                </p>
-              </div>
+              <PayoutPanel
+                settlement={s}
+                payout={payout.data}
+                account={account}
+                busy={busy}
+                onConfirm={doConfirmPayout}
+                onRecover={doRecoverPayout}
+                onRetry={doRetryPayout}
+              />
             )}
 
             {state.phase !== 'idle' && (
@@ -613,4 +682,139 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
       </div>
     </>
   );
+}
+
+/* Delivery, kept visibly apart from the decision.
+ *
+ * `settle` deciding who is owed something and that money arriving are two
+ * different facts, and the contract can only ever see the second one some time
+ * after the first - it cannot watch its own child transaction. So this panel
+ * says which of the two has happened, and refuses to describe a requested
+ * transfer as a payment. The old copy said "the transfer was emitted on chain"
+ * next to a settled escrow, which is true and reads exactly like being paid.
+ */
+function PayoutPanel({
+  settlement: s,
+  payout,
+  account,
+  busy,
+  onConfirm,
+  onRecover,
+  onRetry,
+}: {
+  settlement: Settlement;
+  payout: PayoutStatus | null | undefined;
+  account: { address: string | null };
+  busy: boolean;
+  onConfirm: () => void;
+  onRecover: () => void;
+  onRetry: () => void;
+}) {
+  const beneficiary = s.outcome === 'pay_worker' ? s.payee : s.payer;
+  const isBeneficiary =
+    account.address !== null && account.address.toLowerCase() === beneficiary.toLowerCase();
+  const connected = account.address !== null && !busy;
+  const delivered = payout?.payout_state === 'delivered';
+
+  const rows: [string, string][] = [
+    ['Decided', `${s.outcome.replace('_', ' ')} · ${formatDateTime(s.settled_at)}`],
+    ['Collected in protocol', formatGen(BigInt(s.received))],
+  ];
+  if (payout) {
+    rows.push(['Attempts', String(payout.attempts)]);
+    if (payout.sent_at) rows.push(['Transfer requested', formatDateTime(payout.sent_at)]);
+  }
+
+  const tone = delivered ? 'confirmed' : s.payout_state === 'owed' ? 'inconclusive' : 'info';
+
+  return (
+    <div className={`notice notice--${tone}`}>
+      <p className="notice__title">Decided: {s.outcome.replace('_', ' ')}</p>
+      <p className="notice__body">
+        {deliveryLine(s, payout, delivered)}
+      </p>
+
+      {rows.length > 0 && (
+        <div style={{ marginTop: 'var(--s-3)' }}>
+          <KeyValue rows={rows} />
+        </div>
+      )}
+
+      {payout && !delivered && (
+        <div className="cluster" style={{ marginTop: 'var(--s-4)' }}>
+          {payout.delivered && (
+            <button className="btn btn--ghost" onClick={onConfirm} disabled={!connected}>
+              Confirm delivery
+            </button>
+          )}
+
+          {payout.payout_state === 'sent' &&
+            (payout.recoverable ? (
+              <button className="btn btn--ghost" onClick={onRecover} disabled={!connected}>
+                Recover — the money never left
+              </button>
+            ) : (
+              <span className="hash">
+                Not judged for {formatDuration(payout.recoverable_in_seconds)} — a transfer
+                that has not resolved yet looks the same as one that came back.
+              </span>
+            ))}
+
+          {payout.payout_state === 'owed' && s.fully_funded && (
+            <button
+              className="btn btn--ghost"
+              onClick={onRetry}
+              disabled={!connected || !isBeneficiary}
+            >
+              Resend the payout
+            </button>
+          )}
+
+          {payout.unreconciled_payouts > 1 && (
+            <span className="hash">
+              {payout.unreconciled_payouts} payouts are awaiting reconciliation. Only one at a
+              time can be judged, because they share one balance.
+            </span>
+          )}
+        </div>
+      )}
+
+      {payout?.payout_state === 'owed' && s.fully_funded && !isBeneficiary && (
+        <p className="hash" style={{ marginTop: 'var(--s-2)' }}>
+          Only the beneficiary can resend this. Copy the address below into your wallet.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One sentence saying what is true about the money, and nothing more. */
+function deliveryLine(s: Settlement, payout: PayoutStatus | null | undefined, delivered: boolean) {
+  if (delivered) {
+    return 'The funds were seen to leave the contract, so this escrow is marked paid.';
+  }
+  if (!payout || payout.payout_state === '') {
+    return s.fully_funded
+      ? 'No payout lifecycle has started yet.'
+      : 'Nothing was collected in protocol, so there is no payout to track.';
+  }
+  if (payout.payout_state === 'owed') {
+    return s.fully_funded
+      ? 'The money is still in the contract and has not been sent.'
+      : 'Nothing was collected in protocol, so there is nothing to send.';
+  }
+  // 'sent'
+  return (
+    'A transfer was requested and has not been confirmed as delivered. Until the funds ' +
+    'are seen to leave, this escrow still owes the contract attention.'
+  );
+}
+
+/** Compact duration for a countdown, without pulling in a date library. */
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  return `${Math.max(m, 1)}m`;
 }

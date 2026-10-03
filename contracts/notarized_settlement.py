@@ -17,6 +17,42 @@ STATE_OPEN = "open"
 STATE_ATTESTED = "attested"
 STATE_SETTLED = "settled"
 
+# Delivery lifecycle, deliberately separate from `state`.
+#
+# `state` is the commercial decision, and it is final the moment it is made.
+# `payout_state` is whether the money actually moved, and it is not: an
+# external `emit_transfer` runs after this transaction finalizes, so
+# "settled and paid" is a claim the contract cannot make on its own evidence.
+#
+# Marking an escrow paid on the strength of having *called* emit_transfer is
+# what made a failed outbound transfer unrecoverable: the escrow read as
+# settled, left get_pending_payouts(), and the returned value had no way out.
+PAYOUT_OWED = "owed"
+PAYOUT_SENT = "sent"
+PAYOUT_DELIVERED = "delivered"
+
+# How long an emitted transfer must be left alone before its delivery may be
+# judged either way.
+#
+# Without this, `recover_payout` has to decide between two states that look
+# identical on chain: a child transaction still in flight, and a child that
+# errored and handed its value back. Both leave the balance where it started.
+# Recovering on the first reading and re-sending would pay a beneficiary twice
+# if the original child later went through.
+#
+# A grace period does not *prove* the child resolved, but the child is created
+# when the parent finalizes and the network resolves it in seconds, so a window
+# this long makes an unresolved child implausible rather than merely possible -
+# and the alternative, letting a balance reading authorize a second payment, is
+# the failure mode that actually loses money.
+PAYOUT_GRACE_SECONDS = 3600
+MAX_PAYOUT_GRACE_SECONDS = 7 * 24 * 3600
+
+# An emitted transfer is only ever reconciled against the balance once no other
+# payout is outstanding, so two escrows can never both be judged delivered off
+# the same drop in the shared pool.
+MAX_CONCURRENT_PAYOUT_RECONCILIATIONS = 1
+
 # Settlement outcomes derived from the notarized verdict
 OUTCOME_NONE = "none"
 OUTCOME_PAY_WORKER = "pay_worker"
@@ -92,6 +128,43 @@ class Settlement:
     # refreshed - and the sentinel silently decided whose escrow was protected.
     # This is the flag that actually means it.
     record_bound: bool
+    # Appended at the end only; this is positional storage, so inserting or
+    # reordering would break every already-deployed instance.
+    #
+    # Delivery reconciliation. `transfer_emitted` records that `settle` *asked*
+    # for a transfer, not that the beneficiary received anything, and the two
+    # are not the same event: per the messages documentation an external
+    # message with `on='finalized'` executes *after* the parent transaction is
+    # fully finalized, so at the moment `settle` runs the child has not been
+    # created yet. Marking the escrow paid on the strength of having called
+    # `emit_transfer` therefore asserted delivery before it could be observed,
+    # and if the child errored its value came back through the contract's
+    # error-message path with no route out - the escrow read as settled, left
+    # `get_pending_payouts()`, and its money was unreachable.
+    #
+    # `payout_state` separates the two. Delivery is only believed once the
+    # funds are observed to have left the contract's own balance.
+    payout_state: str
+    # The contract's own balance immediately before the transfer was emitted.
+    # Delivery is proven by the balance having fallen by `received` since this
+    # snapshot, allowing for anything legitimately received in between.
+    balance_at_emit: u256
+    # `total_received` at the same moment. A raw balance comparison would be
+    # defeated by ordinary activity: someone topping up another escrow after this
+    # one was delivered would raise the balance above the snapshot for good, and
+    # `confirm_payout` could then never mark a genuinely paid escrow as paid - it
+    # would sit in the outstanding list forever with the money already gone.
+    # Netting off the contract's own receipts since the emit keeps the comparison
+    # meaningful no matter what else happens in between.
+    received_at_emit: u256
+    # How many transfer attempts this escrow has had, so a repeatedly failing
+    # beneficiary is visible rather than looking like a single unlucky call.
+    payout_attempts: u256
+    # When the current attempt was emitted, canonical ISO. `recover_payout` will
+    # not touch an escrow younger than the grace period, because until the child
+    # transaction has certainly resolved, "the balance is back" is ambiguous -
+    # it is also what an in-flight transfer looks like.
+    payout_sent_at: str
 
 
 def _as_address(value) -> Address:
@@ -183,6 +256,23 @@ def _warmup_complete_at(since: str, hours: int) -> str:
     if start is None:
         return FAR_FUTURE
     return (start + datetime.timedelta(hours=hours)).isoformat()
+
+
+def _seconds_since(moment: str) -> int:
+    """Whole seconds since `moment`, clamped at 0.
+
+    Clamping matters for the reconciliation grace period: a payout whose
+    timestamp is somehow ahead of the chain clock reads as zero seconds old, so
+    it waits out the full window rather than becoming instantly recoverable.
+    """
+    start = _naive(moment)
+    now = _naive(gl.message_raw["datetime"])
+    if start is None or now is None:
+        return 0
+    seconds = int((now - start).total_seconds())
+    if seconds <= 0:
+        return 0
+    return seconds
 
 
 def claim_matches(record_claim: str, spec: str) -> bool:
@@ -295,6 +385,12 @@ class NotarizedSettlement(gl.Contract):
     # so the whole layer is bricked rather than merely degraded. A typo in a
     # one-step transfer would do exactly that, silently and irreversibly.
     pending_owner: Address
+    # Appended last. How long an emitted payout must be left alone before its
+    # delivery may be judged either way. Unlike `trust_warmup_hours`, lowering this
+    # *does* re-open the in-flight race rather than granting nothing new, so it is
+    # a knob about how the network behaves, not a convenience: see
+    # `set_payout_grace_seconds`.
+    payout_grace_seconds: u256
 
     def __init__(self):
         self.owner = gl.message.sender_address
@@ -305,6 +401,7 @@ class NotarizedSettlement(gl.Contract):
         # No successor nominated. Address rather than a bool so "nobody" and
         # "somebody" are the same field and cannot drift apart.
         self.pending_owner = _as_address(ZERO_ADDRESS)
+        self.payout_grace_seconds = u256(PAYOUT_GRACE_SECONDS)
 
     # -- views -------------------------------------------------------------
 
@@ -334,7 +431,12 @@ class NotarizedSettlement(gl.Contract):
             "created_at": s.created_at,
             "deadline": s.deadline,
             "settled_at": s.settled_at,
+            # Whether a transfer was *requested*. Delivery is `payout_state`, and the
+            # two are separate: a request that never landed must not read as a payment.
             "transfer_emitted": s.transfer_emitted,
+            "payout_state": s.payout_state,
+            "payout_attempts": s.payout_attempts,
+            "payout_sent_at": s.payout_sent_at,
             "challenge_count": s.challenge_count,
             "notary_trusted_since": s.notary_trusted_since,
             "bound_revision": s.bound_revision,
@@ -393,9 +495,11 @@ class NotarizedSettlement(gl.Contract):
             s = self.settlements.get(u256(i), None)
             if s is None:
                 break
+            # Awaiting a first attempt: the decision is made and the escrow is
+            # funded, but nothing has been sent yet. Still owed, so still listed.
             if (
                 s.state == STATE_SETTLED
-                and not s.transfer_emitted
+                and s.payout_state == PAYOUT_OWED
                 and s.amount > 0
                 and s.received >= s.amount
             ):
@@ -405,6 +509,21 @@ class NotarizedSettlement(gl.Contract):
                     "amount": s.amount,
                     "outcome": s.outcome,
                     "settled_at": s.settled_at,
+                    "payout_state": s.payout_state,
+                }, sort_keys=True))
+            # Sent, but not yet observed to have landed. The common case, and the
+            # one that used to be invisible: this list is how anybody finds out
+            # that a transfer still needs confirming or recovering.
+            elif s.state == STATE_SETTLED and s.payout_state == PAYOUT_SENT:
+                out.append(json.dumps({
+                    "escrow_id": i,
+                    "beneficiary": str(s.payee) if s.outcome == OUTCOME_PAY_WORKER else str(s.payer),
+                    "amount": s.amount,
+                    "outcome": s.outcome,
+                    "settled_at": s.settled_at,
+                    "payout_state": s.payout_state,
+                    "sent_at": s.payout_sent_at,
+                    "attempts": s.payout_attempts,
                 }, sort_keys=True))
             i += 1
         return out
@@ -443,7 +562,12 @@ class NotarizedSettlement(gl.Contract):
         total = self.next_id
         while i < total:
             s = self.settlements.get(i, None)
-            if s is not None and s.received > 0 and not s.transfer_emitted:
+            # "Outstanding" means money the contract is still answerable for, so
+            # it is keyed on *delivery* rather than on `transfer_emitted`. An
+            # escrow whose transfer was requested but never observed to land is
+            # still outstanding, and dropping it from this view is what made a
+            # failed outbound transfer invisible and unrecoverable.
+            if s is not None and s.received > 0 and s.payout_state != PAYOUT_DELIVERED:
                 outstanding = outstanding + s.received
                 funded_not_paid += 1
             i += 1
@@ -760,6 +884,14 @@ class NotarizedSettlement(gl.Contract):
             notary_trusted_since=trusted_since,
             bound_revision=0,
             record_bound=False,
+            # No decision yet, so nothing is owed. `settle` is what creates a
+            # payout obligation, and it does so by setting one of these rather
+            # than by inferring payment from having called `emit_transfer`.
+            payout_state="",
+            balance_at_emit=u256(0),
+            received_at_emit=u256(0),
+            payout_attempts=u256(0),
+            payout_sent_at="",
         )
         if received > 0:
             self._bump("total_committed", int(received))
@@ -944,23 +1076,277 @@ class NotarizedSettlement(gl.Contract):
         # using another escrow's money - and the shortfall would surface as
         # someone else's escrow failing to settle.
         if s.received >= s.amount and s.received > 0:
-            self.transfer_attempts = self.transfer_attempts + 1
-            try:
-                # Via the ghost contract, not `gl.get_contract_at`: see
-                # _Recipient. The internal-message form silently loses the value.
-                _Recipient(_as_address(beneficiary)).emit_transfer(
-                    value=s.received, on="finalized"
-                )
-                s.transfer_emitted = True
-                self.total_paid_out = self.total_paid_out + s.received
-            except Exception:
-                s.transfer_emitted = False
+            s.payout_state = PAYOUT_OWED
+            self._emit_payout(s, beneficiary)
         else:
             # Underfunded. The decision still stands and stays visible through
             # get_pending_payouts(); there is just nothing to send yet.
             s.transfer_emitted = False
+            s.payout_state = PAYOUT_OWED
 
         return s.outcome
+
+    def _emit_payout(self, s: Settlement, beneficiary: Address) -> None:
+        """Send this escrow's money, if and only if no other payout is in flight.
+
+        The single-in-flight rule is what makes reconciliation sound. Every
+        escrow shares one balance, so a balance reading can only be attributed to
+        one escrow if there is exactly one transfer that could have moved it. Two
+        escrows in flight at once would let either one's delivery - or either
+        one's failure - be read as evidence about the other, and the second one to
+        be confirmed would claim money the first had already taken.
+
+        Serialising costs nothing here. A failed transfer returns its value within
+        the grace period, so the next escrow waits an hour at worst, and the
+        alternative is a contract that can pay the same GEN twice.
+        """
+        if self._payout_in_flight() > 0:
+            # The decision stands; the send is deferred, and this escrow stays
+            # visible as owed rather than pretending a transfer was made.
+            s.transfer_emitted = False
+            s.payout_state = PAYOUT_OWED
+            return
+
+        self.transfer_attempts = self.transfer_attempts + 1
+        s.payout_attempts = s.payout_attempts + 1
+        s.payout_sent_at = _now_canonical()
+        # Snapshot the balance *before* emitting, together with the contract's own
+        # running receipts, so delivery can still be recognised after other
+        # escrows are funded. See `received_at_emit`.
+        s.balance_at_emit = self.balance
+        s.received_at_emit = self.total_received
+        try:
+            # Via the ghost contract, not `gl.get_contract_at`: see _Recipient.
+            # The internal-message form silently loses the value.
+            _Recipient(_as_address(beneficiary)).emit_transfer(
+                value=s.received, on="finalized"
+            )
+            # Recorded as *requested*, not paid. `total_paid_out` is not touched
+            # here: this child transaction has not been created yet, let alone
+            # resolved. Incrementing it now would claim money that has not moved,
+            # and would double-count anything that later came back.
+            # `confirm_payout` moves the number once delivery is observed.
+            s.transfer_emitted = True
+            s.payout_state = PAYOUT_SENT
+        except Exception:
+            s.transfer_emitted = False
+            s.payout_state = PAYOUT_OWED
+            s.balance_at_emit = u256(0)
+            s.received_at_emit = u256(0)
+
+    def _payout_in_flight(self) -> int:
+        """How many escrows are currently in `sent`, i.e. un-reconciled."""
+        count = 0
+        i = u256(0)
+        total = self.next_id
+        while i < total:
+            other = self.settlements.get(i, None)
+            if other is not None and other.payout_state == PAYOUT_SENT:
+                count += 1
+            i += 1
+        return count
+
+    def _delivered(self, s) -> bool:
+        """Has this escrow's money provably left the contract?
+
+        Measured against the snapshot taken immediately before the emit, net of
+        anything the contract has legitimately received since. Without that net
+        figure the check would be wrong in the direction that matters: a top-up
+        to any other escrow would raise the balance above the snapshot, and a
+        payout that had genuinely been delivered could then never be confirmed.
+        The escrow would sit in the outstanding list for good with the money
+        already at the payee.
+
+        Only value the contract cannot account for defeats it - a bare transfer
+        attached to a transaction that reverted, which is already reported as
+        `unattributed` by `get_fund_conservation`. The grace period is what
+        covers that case.
+        """
+        if s.payout_state != PAYOUT_SENT:
+            return s.payout_state == PAYOUT_DELIVERED
+        received_since = self.total_received
+        if received_since > s.received_at_emit:
+            received_since = received_since - s.received_at_emit
+        else:
+            received_since = u256(0)
+        return self.balance - received_since + s.received <= s.balance_at_emit
+
+    @gl.public.write
+    def confirm_payout(self, escrow_id: u256) -> str:
+        """Record that the beneficiary actually received the money.
+
+        Permissionless, because it only ever *reduces* this contract's exposure:
+        it moves an escrow out of the outstanding set once the funds are observed
+        to have left. Anyone may watch the balance and call it, and nobody is
+        trusted for it - the check is arithmetic against a snapshot the contract
+        itself recorded, not a claim by the caller.
+
+        Without this, nothing could ever move `total_paid_out`, because
+        `settle` cannot observe its own child transaction. That is the trade this
+        makes: the number of paid escrows lags reality until somebody reconciles,
+        in exchange for never having claimed a payment that did not happen.
+
+        It refuses to mark a payout delivered while any other payout is
+        un-reconciled, for the same reason `recover_payout` does: one shared
+        balance cannot tell two escrows apart.
+        """
+        self._check_active()
+        s = self._must_get(escrow_id)
+        if s.payout_state == PAYOUT_DELIVERED:
+            return PAYOUT_DELIVERED
+        if s.payout_state != PAYOUT_SENT:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} has no payout awaiting confirmation"
+            )
+        others = self._payout_in_flight() - 1
+        if others > MAX_CONCURRENT_PAYOUT_RECONCILIATIONS - 1:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} {others} other payouts are un-reconciled; "
+                "a shared balance cannot attribute the funds to one of them yet"
+            )
+        if not self._delivered(s):
+            # Either the child transaction has not resolved yet, or it failed and
+            # the value is back in the contract. Both mean the same thing here:
+            # do not mark it paid. If it comes back for good, `recover_payout`
+            # puts the obligation back in play.
+            return PAYOUT_SENT
+        s.payout_state = PAYOUT_DELIVERED
+        s.payout_sent_at = ""
+        # Guarded, so a second call cannot inflate the total. The state check
+        # above returns early, and this makes the invariant local as well.
+        self.total_paid_out = self.total_paid_out + s.received
+        return PAYOUT_DELIVERED
+
+    @gl.public.write
+    def recover_payout(self, escrow_id: u256) -> str:
+        """Return an undelivered payout to `owed`, so `retry_payout` can resend it.
+
+        Permissionless, and deliberately slow. It refuses to touch an escrow whose
+        last attempt is younger than the grace period, because until the child
+        transaction has certainly resolved there are two readings of the same
+        balance and they lead opposite ways:
+
+            in flight      -> recovering and resending pays the beneficiary twice
+            failed, refunded -> recovering and resending is the only way the
+                                money ever gets out of this contract
+
+        Waiting is what separates them. A failed transfer hands its value back
+        within seconds, so after the window the only reading left is "it never
+        left".
+
+        It is also required to be the only un-reconciled payout in the contract,
+        for the shared-balance reason documented on `_emit_payout`.
+        """
+        self._check_active()
+        s = self._must_get(escrow_id)
+        if s.payout_state != PAYOUT_SENT:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} has no payout awaiting recovery"
+            )
+        if not s.payout_sent_at:
+            # Defensive: a `sent` escrow with no timestamp cannot be aged, so it
+            # cannot be proven resolved. Refusing here is the safe direction.
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} has no attempt timestamp to age"
+            )
+        age = _seconds_since(s.payout_sent_at)
+        if age < int(self.payout_grace_seconds):
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} was sent {age}s ago; "
+                f"wait {int(self.payout_grace_seconds) - age}s before recovering"
+            )
+        if self.balance < s.balance_at_emit:
+            # The funds are gone. This escrow is paid, whoever has yet to notice.
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} was delivered; confirm_payout instead"
+            )
+        others = self._payout_in_flight() - 1
+        if others > MAX_CONCURRENT_PAYOUT_RECONCILIATIONS - 1:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} {others} other payouts are un-reconciled; "
+                "a shared balance cannot attribute the funds to one of them yet"
+            )
+        s.payout_state = PAYOUT_OWED
+        s.transfer_emitted = False
+        return PAYOUT_OWED
+
+    @gl.public.write
+    def retry_payout(self, escrow_id: u256) -> str:
+        """Resend a payout that `recover_payout` returned to `owed`.
+
+        Separate from `settle` because `settle` is gated on the escrow still being
+        `attested`, and a recovered escrow is already `settled` - its decision was
+        made and must not be remade. Routing the retry through `settle` would
+        either be impossible or would re-run the verdict and re-bump the
+        pay/refund totals, double-counting the decision as well as risking the
+        money.
+
+        The beneficiary is the only caller allowed to retry. They are the party
+        the money is for, so this costs nothing in practice and removes the
+        possibility of a third party repeatedly re-sending GEN to an address that
+        has already been paid.
+        """
+        self._check_active()
+        s = self._must_get(escrow_id)
+        if s.state != STATE_SETTLED:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is not settled: {s.state}"
+            )
+        if s.outcome == OUTCOME_NONE:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} has no resolved outcome to pay"
+            )
+        if s.payout_state != PAYOUT_OWED:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is not awaiting a retry: "
+                f"{s.payout_state}"
+            )
+        if s.received < s.amount or s.received == 0:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is underfunded: "
+                f"{s.received} of {s.amount}"
+            )
+        beneficiary = s.payee if s.outcome == OUTCOME_PAY_WORKER else s.payer
+        if gl.message.sender_address != _as_address(beneficiary):
+            raise gl.vm.UserError(
+                f"{ERROR_PERMISSION} only the beneficiary can retry escrow {escrow_id}"
+            )
+        self._emit_payout(s, beneficiary)
+        return s.payout_state
+
+    @gl.public.view
+    def get_payout_state(self, escrow_id: u256) -> dict:
+        """Delivery status, kept apart from the commercial `state` on purpose."""
+        s = self._must_get(escrow_id)
+        age = _seconds_since(s.payout_sent_at) if s.payout_sent_at else 0
+        recoverable = (
+            s.payout_state == PAYOUT_SENT
+            and age >= int(self.payout_grace_seconds)
+            and self.balance >= s.balance_at_emit
+        )
+        return {
+            "payout_state": s.payout_state,
+            "attempts": s.payout_attempts,
+            "received": s.received,
+            "delivered": self._delivered(s),
+            "balance_at_emit": s.balance_at_emit,
+            "received_at_emit": s.received_at_emit,
+            "contract_balance": self.balance,
+            "sent_at": s.payout_sent_at,
+            "sent_seconds_ago": age,
+            "recoverable": recoverable,
+            "recoverable_in_seconds": (
+                0
+                if recoverable or s.payout_state != PAYOUT_SENT
+                else (
+                    int(self.payout_grace_seconds) - age
+                    if age < int(self.payout_grace_seconds)
+                    else 0
+                )
+            ),
+            "unreconciled_payouts": self._payout_in_flight(),
+            "grace_seconds": self.payout_grace_seconds,
+        }
 
     @gl.public.write
     def challenge(self, escrow_id: u256, reason: str) -> None:
@@ -1079,6 +1465,32 @@ class NotarizedSettlement(gl.Contract):
             )
         self.trust_warmup_hours = u256(value)
         return u256(self.trust_warmup_hours)
+
+    @gl.public.write
+    def set_payout_grace_seconds(self, seconds: u256) -> u256:
+        """Owner-only. Defaults to PAYOUT_GRACE_SECONDS.
+
+        How long an emitted payout must be left alone before anyone may judge it
+        delivered or recoverable. The window exists because the contract cannot
+        see its own child transaction, and until that child resolves, "the balance
+        is back where it was" is equally consistent with "still in flight".
+
+        Lowering this re-opens that race, so unlike `trust_warmup_hours` it is not
+        a knob an owner can lower for convenience without a real cost - paying the
+        same GEN twice is the failure this whole mechanism was built to prevent.
+        It is exposed anyway, because the right window depends on how fast a given
+        network resolves child transactions, which is not a property this contract
+        can know at compile time and which changes between networks.
+        """
+        if gl.message.sender_address != self.owner:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner can set the payout grace")
+        value = int(seconds)
+        if value < 0 or value > MAX_PAYOUT_GRACE_SECONDS:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} grace must be 0..{MAX_PAYOUT_GRACE_SECONDS} seconds"
+            )
+        self.payout_grace_seconds = u256(value)
+        return u256(self.payout_grace_seconds)
 
     @gl.public.write
     def set_paused(self, new_paused: bool) -> None:
