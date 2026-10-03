@@ -582,7 +582,7 @@ Covered by `tests/integration/test_payout_reconciliation.py` (11 tests on
 StudioNet), the precondition tests in `tests/test_settlement.py`, and by
 `D:\Genlayer-project\wallet\prove_payout_reconciliation.py`, which drives the
 deployed 31-method pair through the whole lifecycle with GEN that really moves and
-asserts all 18 of its checks. That harness exists because **this gltest build
+asserts all 28 of its checks. That harness exists because **this gltest build
 cannot send value** — `gltest/contracts/contract.py` builds every method as
 `lambda self, args=None: write_contract_wrapper(self, method_name, args)` with no
 `value` parameter threaded through — so a gltest escrow can never be funded and
@@ -784,8 +784,8 @@ GenLayer StudioNet.
 | `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **pre-reconciliation** |
 | `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — target of the full method sweep |
 | `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, **pre-reconciliation** |
-| `AINotary` | `0x9cC2dB927dA670e3A9e82d80F4D81cEBCde46788` | **recon** — 12 methods, carries the reconciliation proof |
-| `NotarizedSettlement` | `0x0d87F16aB93131A3f9DfBA24eceE98703fE87732` | **recon** — 31 methods, all 18 proof checks pass |
+| `AINotary` | `0xa24126eA734c544d1c86B815Dbd83BD39d1ad4a5` | **recon** — 12 methods, carries the reconciliation proof |
+| `NotarizedSettlement` | `0x1854C6Cfb2e227750d6DC878a75e35597FeE475f` | **recon** — 31 methods, all 28 proof checks pass |
 
 The demo and test pairs predate the reconciliation fix: Intelligent Contracts
 cannot be upgraded, so `confirm_payout` / `recover_payout` / `retry_payout` /
@@ -798,8 +798,8 @@ Deployed and verified by schema — 12 and 25 methods on demo/test, 12 and 31 on
 recon, each matching `genvm-lint` for the source it was built from. The
 stale-verdict fix is proven against real GenVM by
 `D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the reconciliation by
-`prove_payout_reconciliation.py` (2 GEN moved across two escrows, all 18 checks
-pass).
+`prove_payout_reconciliation.py` (2 GEN moved per run across two escrows, all 28
+checks pass, and the harness is re-runnable against the same pair).
 
 **Coverage is audited, not asserted.** `test_all_methods.py` used to end with a
 hard-coded `f"… of 27 contract methods covered"`, which counted the calls it
