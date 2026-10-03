@@ -529,6 +529,55 @@ class NotarizedSettlement(gl.Contract):
         return out
 
     @gl.public.view
+    def get_unfunded_obligations(self, offset: u256, limit: u256) -> DynArray[str]:
+        """Decided escrows that can never be paid, because nobody funded them.
+
+        A separate list, and deliberately not part of `get_pending_payouts`. An
+        external settler must never pay an escrow that collected less than its
+        amount - every escrow shares one GEN pool, so it would be paying out of
+        someone else's money, which is the bug `received >= amount` exists to
+        prevent.
+
+        But excluding them here does not make them go away. `fund_settlement`
+        refuses once an escrow is settled, and the decision is final, so an escrow
+        decided while underfunded is permanently unpayable: the payer's money is
+        short, the verdict is in, and no route exists to close the gap. That is a
+        real outcome and it used to be visible nowhere - the escrow read as
+        `settled`, was absent from the pending list, and looked identical to one
+        that had been paid.
+
+        Listed with the shortfall rather than as a payment instruction, so it can
+        be chased without ever being settled out of the shared pool.
+        """
+        if limit == 0 or limit > 50:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} limit must be 1..50")
+        out: list = []
+        i = offset
+        total = self.next_id
+        while i < total and len(out) < limit:
+            s = self.settlements.get(u256(i), None)
+            if s is None:
+                break
+            if (
+                s.state == STATE_SETTLED
+                and s.amount > 0
+                and s.received < s.amount
+                and s.payout_state != PAYOUT_DELIVERED
+            ):
+                out.append(json.dumps({
+                    "escrow_id": i,
+                    "beneficiary": str(s.payee) if s.outcome == OUTCOME_PAY_WORKER else str(s.payer),
+                    "amount": s.amount,
+                    "received": s.received,
+                    "shortfall": s.amount - s.received,
+                    "outcome": s.outcome,
+                    "settled_at": s.settled_at,
+                    "payable": False,
+                }, sort_keys=True))
+            i += 1
+        return out
+
+    @gl.public.view
     def get_contract_balance(self) -> u256:
         return self.balance
 

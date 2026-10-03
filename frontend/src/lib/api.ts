@@ -22,6 +22,7 @@ import type {
   Settlement,
   SettlementStats,
   SettlementSummary,
+  UnfundedObligation,
   VerdictFreshness,
 } from './types';
 
@@ -143,6 +144,15 @@ export const getSettlements = (offset: number, limit: number) =>
 export const getPendingPayouts = (offset: number, limit: number) =>
   read<string[]>(SETTLEMENT, 'get_pending_payouts', [offset, limit]).then((rows) =>
     rows.map((r) => JSON.parse(r) as PendingPayout),
+  );
+
+/** Decided escrows that can never be paid, because nobody funded them.
+ *
+ *  Not payment instructions: a settler acting on one would spend another
+ *  escrow's money out of the shared pool. Listed so the dead end is visible. */
+export const getUnfundedObligations = (offset: number, limit: number) =>
+  read<string[]>(SETTLEMENT, 'get_unfunded_obligations', [offset, limit]).then((rows) =>
+    rows.map((r) => JSON.parse(r) as UnfundedObligation),
   );
 
 export const getNotaryTrust = (notary: string) =>

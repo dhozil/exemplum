@@ -1253,6 +1253,24 @@ def test_a_funded_but_undecided_escrow_is_not_pending(settlement, addrs, direct_
     assert settlement.get_pending_payouts(0, 50) == []
 
 
+def test_an_undecided_escrow_is_not_an_unfunded_obligation(settlement, addrs, direct_vm, trusted):
+    """The other half of the same rule: nothing is wrong with an escrow until it
+    is decided. Reporting it as unfunded would cry wolf on every open escrow."""
+    escrow_id = open_one(settlement, addrs)
+
+    assert settlement.get_unfunded_obligations(0, 50) == []
+
+
+def test_the_unfunded_list_is_bounded_and_nonempty_by_id(settlement, addrs, trusted):
+    with pytest.raises(Exception) as exc:
+        settlement.get_unfunded_obligations(0, 0)
+    assert "limit must be 1..50" in str(exc.value)
+
+    with pytest.raises(Exception) as exc:
+        settlement.get_unfunded_obligations(0, 51)
+    assert "limit must be 1..50" in str(exc.value)
+
+
 def test_the_settlement_view_carries_the_delivery_fields(settlement, addrs, trusted):
     """`transfer_emitted` alone is the field that lied, so the delivery
     lifecycle has to be readable from the same view a client already calls."""

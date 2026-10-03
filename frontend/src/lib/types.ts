@@ -219,6 +219,25 @@ export interface PendingPayout {
   attempts?: number;
 }
 
+/** A decided escrow that can never be paid, because nobody funded it.
+ *
+ *  Deliberately separate from `PendingPayout`: these are not payment
+ *  instructions. Every escrow shares one GEN pool, so a settler acting on one
+ *  would spend another escrow's money.
+ */
+export interface UnfundedObligation {
+  escrow_id: number;
+  beneficiary: string;
+  amount: number;
+  received: number;
+  /** What is missing. `fund_settlement` refuses once settled, so this gap is
+   *  permanent. */
+  shortfall: number;
+  outcome: Outcome;
+  settled_at: string;
+  payable: false;
+}
+
 /** One row of the on-chain evidence ledger: what a given revision relied on. */
 export interface RevisionEvidence {
   revision: number;

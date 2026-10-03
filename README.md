@@ -7,8 +7,8 @@
 **An automated notary for claims about the real world, and a settlement layer that pays out on its verdict.**
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
-[![Methods](https://img.shields.io/badge/on--chain%20methods-42-7E14FF?style=flat-square)](#api)
-[![Tests](https://img.shields.io/badge/tests-383-2E7D32?style=flat-square)](#verify)
+[![Methods](https://img.shields.io/badge/on--chain%20methods-43-7E14FF?style=flat-square)](#api)
+[![Tests](https://img.shields.io/badge/tests-374-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
 [Live deployment](#deploy-the-frontend) · [How it works](#how-it-works) · [API](#api) · [Limitations](#known-limitations) · [Deploy it yourself](#deploy)
@@ -250,6 +250,7 @@ can only ever observe the second one some time *after* it asks for it — see
 | `get_settlement(escrow_id) -> dict` | Full record, includes `received`, `fully_funded`, `notary_trusted_since`. |
 | `get_settlements_paginated(offset, limit)` | JSON rows, `limit` capped at 50. |
 | `get_pending_payouts(offset, limit)` | Funded, settled obligations still `owed` or `sent`. |
+| `get_unfunded_obligations(offset, limit)` | Decided escrows that can never be paid. **Not** payment instructions. |
 | `get_payout_state(escrow_id) -> dict` | Delivery status, attempt count, grace countdown. |
 | `get_stats() -> dict` | O(1) tallies. |
 | `get_contract_balance() -> u256` | In-protocol balance. |
@@ -577,10 +578,35 @@ children is not knowable at compile time — unlike `trust_warmup_hours`, loweri
 `retry_payout` is beneficiary-only. It is their money, so nobody else has a reason
 to be able to trigger it, and the gate costs nothing in practice.
 
-Covered by `tests/integration/test_payout_reconciliation.py` (live GEN, real child
-transactions) and by the precondition tests in `tests/test_settlement.py` — the
-direct harness does not credit a contract's balance, so the arithmetic itself can
-only be exercised against a real network.
+Covered by `tests/integration/test_payout_reconciliation.py` (11 tests on
+StudioNet), the precondition tests in `tests/test_settlement.py`, and by
+`D:\Genlayer-project\wallet\prove_payout_reconciliation.py`, which drives the
+deployed 31-method pair through the whole lifecycle with GEN that really moves and
+asserts all 18 of its checks. That harness exists because **this gltest build
+cannot send value** — `gltest/contracts/contract.py` builds every method as
+`lambda self, args=None: write_contract_wrapper(self, method_name, args)` with no
+`value` parameter threaded through — so a gltest escrow can never be funded and
+never reaches `sent`.
+
+### An obligation that can never be paid
+
+A third dead end turned up while testing the above, and it is pre-existing rather
+than introduced here.
+
+`fund_settlement` refuses once an escrow is `settled`, and the decision is final.
+So an escrow that reaches its verdict while underfunded is **permanently
+unpayable**: the verdict is in, the payer's money is short, and there is no route
+to close the gap. `get_pending_payouts` correctly excludes it — a settler must
+never pay an escrow that collected less than its amount, or it would be spending
+another escrow's money out of the shared pool — but excluding it made it invisible.
+It read as `settled`, was absent from the pending list, and looked exactly like
+one that had been paid.
+
+`get_unfunded_obligations` lists those escrows with their `shortfall` and
+`payable: false`. It is deliberately a *separate* view rather than a flag on the
+pending list, so it can never be mistaken for a payment instruction. Surfacing
+the dead end is the point; quietly resolving it would mean letting a settler
+distribute money that was never escrowed.
 
 > **A real limitation, and a correction.** GEN sent with a call that *reverts*
 > stays in the contract. Measured, not inferred: a `open_settlement` carrying
@@ -639,11 +665,11 @@ only be exercised against a real network.
 
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
-contracts/notarized_settlement.py           30 methods  – escrow, trust list, settlement decision, payout reconciliation
+contracts/notarized_settlement.py           31 methods  – escrow, trust list, settlement decision, payout reconciliation
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
-tests/test_settlement.py                     109 direct-mode tests
-tests/integration/.                          53 tests against real GenVM
+tests/test_settlement.py                     111 direct-mode tests
+tests/integration/.                          50 tests against real GenVM
 frontend/.                                   React dApp for both contracts (119 component/logic tests)
 deploy/deploy_ai_notary.py                   deploy entrypoint
 gltest.config.yaml                           gltest paths
@@ -702,9 +728,9 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 | Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
 | Frontend (`vitest`) | **110** | 11 files |
-| On-chain methods | **42** | 12 notary + 30 settlement, checked against the deployed schema |
+| On-chain methods | **43** | 12 notary + 31 settlement, checked against the deployed schema |
 
-`genvm-lint` is clean on both contracts, and every one of the 42 on-chain methods
+`genvm-lint` is clean on both contracts, and every one of the 43 on-chain methods
 has been called against a live deployment — the coverage audit compares what the
 script exercised against the schema the node returns, so a method added later
 without being tested shows up as a failure rather than passing silently.
@@ -750,26 +776,30 @@ genlayer schema <address>             # confirm all methods are exposed
 
 ### Current deployment
 
-GenLayer StudioNet. **These addresses predate the payout-reconciliation fix** —
-the settlement pair below is the 25-method version, which marked a transfer paid
-on the strength of having called `emit_transfer`. Redeploying is the only way to
-pick up `confirm_payout` / `recover_payout` / `retry_payout`, since Intelligent
-Contracts cannot be upgraded; the addresses and the schema coverage here get
-replaced when that happens.
+GenLayer StudioNet.
 
 | Contract | Address | Purpose |
 |---|---|---|
 | `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — curated records, what the frontend reads |
 | `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **pre-reconciliation** |
 | `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — same, **pre-reconciliation** |
+| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, **pre-reconciliation** |
+| `AINotary` | `0x9cC2dB927dA670e3A9e82d80F4D81cEBCde46788` | **recon** — 12 methods, carries the reconciliation proof |
+| `NotarizedSettlement` | `0x0d87F16aB93131A3f9DfBA24eceE98703fE87732` | **recon** — 31 methods, all 18 proof checks pass |
 
-Deployed and verified by schema — 12 and 25 methods, matching `genvm-lint` exactly
-at the time of deployment. Current source is 12 and **30**; the five-method gap is
-the reconciliation surface described above, which is lint-clean and covered by
-tests but not yet deployed. The stale-verdict fix is proven against real GenVM by
-`D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the money path by
-`probe_value_transfer.py` (real GEN, both directions of the payout).
+The demo and test pairs predate the reconciliation fix: Intelligent Contracts
+cannot be upgraded, so `confirm_payout` / `recover_payout` / `retry_payout` /
+`get_payout_state` / `get_unfunded_obligations` exist only on the recon pair. The
+frontend's no-env default still points at demo, so the delivery panel reads as
+"no payout lifecycle has started" there rather than pretending. **Repointing demo
+at a reconciliation deployment is the remaining step before submission.**
+
+Deployed and verified by schema — 12 and 25 methods on demo/test, 12 and 31 on
+recon, each matching `genvm-lint` for the source it was built from. The
+stale-verdict fix is proven against real GenVM by
+`D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the reconciliation by
+`prove_payout_reconciliation.py` (2 GEN moved across two escrows, all 18 checks
+pass).
 
 **Coverage is audited, not asserted.** `test_all_methods.py` used to end with a
 hard-coded `f"… of 27 contract methods covered"`, which counted the calls it
