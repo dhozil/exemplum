@@ -165,6 +165,13 @@ class Settlement:
     # transaction has certainly resolved, "the balance is back" is ambiguous -
     # it is also what an in-flight transfer looks like.
     payout_sent_at: str
+    # Value handed back by `__on_errored_message__`, cumulatively. A payout that
+    # fails returns its GEN here, and this is the receipt for it.
+    returned_value: u256
+    # How many payouts the platform has reported as failed. Non-zero means the
+    # outbound path is broken for somebody, which used to be invisible: the
+    # escrow stayed `sent` forever and the value sat in the contract unlabelled.
+    failed_payouts: u256
 
 def _as_address(value) -> Address:
     """Coerce to Address.
@@ -390,6 +397,10 @@ class NotarizedSettlement(gl.Contract):
     # a knob about how the network behaves, not a convenience: see
     # `set_payout_grace_seconds`.
     payout_grace_seconds: u256
+    # Cumulative value handed back by `__on_errored_message__`. Kept at contract
+    # level as well as per-escrow so a return that matched no escrow is still
+    # visible instead of being silently absorbed.
+    total_returned_value: u256
 
     def __init__(self):
         self.owner = gl.message.sender_address
@@ -401,6 +412,7 @@ class NotarizedSettlement(gl.Contract):
         # "somebody" are the same field and cannot drift apart.
         self.pending_owner = _as_address(ZERO_ADDRESS)
         self.payout_grace_seconds = u256(PAYOUT_GRACE_SECONDS)
+        self.total_returned_value = u256(0)
 
     # -- views -------------------------------------------------------------
 
@@ -940,6 +952,8 @@ class NotarizedSettlement(gl.Contract):
             received_at_emit=u256(0),
             payout_attempts=u256(0),
             payout_sent_at="",
+            returned_value=u256(0),
+            failed_payouts=u256(0),
         )
         if received > 0:
             self._bump("total_committed", int(received))
@@ -985,6 +999,58 @@ class NotarizedSettlement(gl.Contract):
         s.received = s.received + value
         self.total_received = self.total_received + value
         self._bump("total_committed", int(value))
+
+    @gl.public.write.payable
+    def __on_errored_message__(self):
+        """The platform tells us a payout failed, instead of us inferring it.
+
+        This is the hook the SDK documents for exactly this: "called when
+        execution of an emitted message, that had a value, was not successful".
+        Without an override the base class body is `pass` - "by default, it simply
+        accepts the refunded value" - so the GEN comes back and **nothing records
+        which escrow it belonged to**. The escrow stays `sent` forever, it stays in
+        `get_pending_payouts`, and the value is in the contract attributed to
+        nothing. That is precisely the unrecoverable state this contract is
+        supposed to have fixed.
+
+        Two official sources disagree on the refund itself. The Value Transfers page
+        says "If the child transaction fails, the value is not automatically
+        returned to the sender"; this hook's own docstring says the default
+        implementation "simply accepts the refunded value". Read together the value
+        does come back - but through this callback, which is why overriding it is
+        what turns a refund into a recoverable obligation.
+
+        Only one payout may be in flight, enforced on every emit, so a returned
+        value has exactly one candidate. If there is none the value is still
+        counted, because refusing it would lose it - and an unattributable return
+        is a fact worth surfacing rather than a reason to throw the money away.
+        """
+        self.total_returned_value = self.total_returned_value + gl.message.value
+        candidate = self._only_payout_in_flight()
+        if candidate is None:
+            return
+        candidate.payout_state = PAYOUT_OWED
+        candidate.transfer_emitted = False
+        candidate.returned_value = candidate.returned_value + gl.message.value
+        candidate.failed_payouts = candidate.failed_payouts + 1
+
+    def _only_payout_in_flight(self):
+        """The single `sent` escrow, or None if there is not exactly one.
+
+        Safe because `_emit_payout` refuses to emit while another payout is
+        un-reconciled, so two escrows can never both be `sent`.
+        """
+        found = None
+        i = u256(0)
+        total = self.next_id
+        while i < total:
+            other = self.settlements.get(i, None)
+            if other is not None and other.payout_state == PAYOUT_SENT:
+                if found is not None:
+                    return None
+                found = other
+            i += 1
+        return found
 
     # NOTE, on hooks. `gl.Contract` already defines `__on_errored_message__` as
     # a public payable method with a `pass` body - "by default, it simply accepts
@@ -1416,6 +1482,8 @@ class NotarizedSettlement(gl.Contract):
             ),
             "unreconciled_payouts": self._payout_in_flight(),
             "grace_seconds": self.payout_grace_seconds,
+            "returned_value": s.returned_value,
+            "failed_payouts": s.failed_payouts,
         }
 
     @gl.public.write
