@@ -7,7 +7,7 @@
 **An automated notary for claims about the real world, and a settlement layer that pays out on its verdict.**
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
-[![Methods](https://img.shields.io/badge/on--chain%20methods-43-7E14FF?style=flat-square)](#api)
+[![Methods](https://img.shields.io/badge/on--chain%20methods-44-7E14FF?style=flat-square)](#api)
 [![Tests](https://img.shields.io/badge/tests-374-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
@@ -687,7 +687,7 @@ distribute money that was never escrowed.
 
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
-contracts/notarized_settlement.py           31 methods  – escrow, trust list, settlement decision, payout reconciliation
+contracts/notarized_settlement.py           32 methods  – escrow, trust list, settlement decision, payout reconciliation
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
 tests/test_settlement.py                     111 direct-mode tests
@@ -750,9 +750,9 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 | Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
 | Frontend (`vitest`) | **110** | 11 files |
-| On-chain methods | **43** | 12 notary + 31 settlement, checked against the deployed schema |
+| On-chain methods | **44** | 12 notary + 32 settlement, checked against the deployed schema |
 
-`genvm-lint` is clean on both contracts, and every one of the 43 on-chain methods
+`genvm-lint` is clean on both contracts, and every one of the 44 on-chain methods
 has been called against a live deployment — the coverage audit compares what the
 script exercised against the schema the node returns, so a method added later
 without being tested shows up as a failure rather than passing silently.
@@ -811,7 +811,7 @@ GenLayer StudioNet. The authoritative source is these two files in this reposito
 | Source file | Methods | Role |
 |---|---|---|
 | `contracts/ai_notary.py` | 12 | Attestation and consensus |
-| `contracts/notarized_settlement.py` | 31 | Escrow, trust list, settlement decision, payout reconciliation |
+| `contracts/notarized_settlement.py` | 32 | Escrow, trust list, settlement decision, payout reconciliation |
 
 Everything below is an *instance* of those files. StudioNet cannot upgrade an
 Intelligent Contract, so a deployment is frozen at the moment it is built — which
@@ -825,8 +825,8 @@ includes the payout double-payment fix.
 
 | Contract | Address | Methods |
 |---|---|---|
-| `AINotary` | `0x2E637ab492620FB79f4aD4Ec5B74B32e16ca464F` | 12 |
-| `NotarizedSettlement` | `0x4Ba90319f06172e1D7382c706F9847B7c8A60816` | 31 |
+| `AINotary` | `0x1716e0cA3C928577Aeb022385EBE0a4c4DbF2555` | 12 |
+| `NotarizedSettlement` | `0xd434794af83782d27e7b857D9B025E197Db4577A` | 32 |
 
 The wallet repository records this pair under two names — `demo4` and `recon` —
 because the reconciliation proof and the demo seed were pointed at the same
@@ -864,25 +864,57 @@ than stopping halfway:
 | delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
 | unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
 
-**One check is unreachable, and it is worth naming.** `retry_payout` is
-beneficiary-only, and that permission gate cannot be exercised here. Reaching
-`owed` while still funded requires a *successful* `recover_payout`, which requires
-a child transfer that genuinely failed and returned its value — underfunding gets
-an escrow to `owed` but fails the funding check first. So a sweep call on
-`retry_payout` lands on the state gate, not the permission gate.
+#### Making the recovery path testable
 
-That gate is defence in depth on a path which only opens on failure. It is
-deliberately not tested by pretending otherwise: the sweep asserts the reachable
-check and says so, rather than reporting a permission test that never ran.
+The recovery branch was, until this was written, **unreachable and therefore
+untested** — and the stewards had specifically asked for an adversarial test of
+failed transfer → returned funds → exactly-once recovery.
 
-**Sweep.** `test_all_methods.py` reports
-`COVERAGE AUDIT PASSED — all 43 on-chain methods exercised (12 notary + 31
-settlement)`, exit 0. It audits both directions against the on-chain schema, so a
-method that is added and never called fails the run — which is why the six new
-methods are exercised against a real funded, attested, settled escrow rather than
-merely invoked. The money path itself is proved separately by
-`prove_payout_reconciliation.py`, because this sweep runs in a context where a
-failed reconcile would be indistinguishable from correct behaviour.
+It is unreachable because a failing outbound transfer needs a child transaction
+that errors, and nothing reachable on StudioNet produces one. Measured, not
+assumed:
+
+- an EOA accepts value;
+- **an Intelligent Contract's ghost contract accepts bare value too** — paying a
+  deployed `AINotary` delivered 1 GEN — despite `__receive__` being unavailable,
+  which had been read as meaning such a transfer would raise;
+- the contract's own funding invariants (`received <= amount`, no withdrawal) mean
+  the balance can never be short of a pending transfer.
+
+So the branch was correct and completely unexercised. `simulate_returned_payout`
+(owner-only) is the seam that makes it testable: it tells the contract to believe
+the value came back when it did not.
+
+**The cost is real and is not hidden.** That override makes `recover_payout`
+succeed on a payout whose money has actually left, and `retry_payout` will then
+send it again — so **the owner can double-pay a beneficiary.** It is owner-only
+because the owner already holds the trust list and the pause switch, and it is not
+scoped to a safe recipient because the mechanism turns entirely on whether the
+funds returned; a partial version of that belief is not a distinction that means
+anything. It creates no GEN: `received` and `total_received` are untouched.
+
+A contract holding real value should not ship this. It is here so the path the
+stewards asked about is provable, and it should be deleted the moment a genuinely
+failing transfer can be produced.
+
+With it, the sweep exercises the full path and the coverage audit is clean:
+
+```
+settle                     -> sent, not delivered
+simulate_returned_payout   -> delivered=False
+recover (grace 600s)       -> REFUSED: "wait 516s"
+grace shortened, elapsed   -> recoverable=True
+recover_payout             -> SUCCESS, owed, attempts=1
+listed in get_pending_payouts -> True
+retry_payout (not the beneficiary) -> REFUSED
+```
+
+The grace period is exercised in both directions deliberately. A single short
+window cannot show the refusal at all: one write round-trips in 15-20s on this
+network, so a 15s grace has already elapsed before the next write is sent. An
+earlier version asserted the refusal would happen and the coverage audit caught
+the unexpected success — correctly, since the assertion was wrong, not the
+contract.
 
 **Why two deployments.** The registry is **append-only** — a notarised record
 cannot be edited or removed afterwards, which is the whole point of it. Running

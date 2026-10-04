@@ -98,6 +98,10 @@ export interface PayoutStatus {
   /** How many payouts this contract has awaiting reconciliation. */
   unreconciled_payouts: number;
   grace_seconds: number;
+  /** True when the owner has asserted a failed transfer returned its value via
+   *  the test seam. It makes this payout recoverable even though the funds have
+   *  actually left, so it is shown rather than acted on. */
+  simulated_return: boolean;
 }
 
 export interface Settlement {
