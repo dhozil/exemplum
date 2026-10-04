@@ -806,38 +806,63 @@ genlayer schema <address>             # confirm all methods are exposed
 
 ### Current deployment
 
-GenLayer StudioNet. Three pairs, because Intelligent Contracts cannot be upgraded
-and the payout fix landed after the first two were deployed.
+GenLayer StudioNet. The authoritative source is these two files in this repository:
 
-| Contract | Address | Purpose |
+| Source file | Methods | Role |
 |---|---|---|
-| `AINotary` | `0x2E637ab492620FB79f4aD4Ec5B74B32e16ca464F` | **demo4** — 12 methods. **The frontend's default.** |
-| `NotarizedSettlement` | `0x4Ba90319f06172e1D7382c706F9847B7c8A60816` | **demo4** — 31 methods, all 43 covered by the sweep |
-| `AINotary` | `0xa24126eA734c544d1c86B815Dbd83BD39d1ad4a5` | **recon** — 12 methods, carries the reconciliation proof |
-| `NotarizedSettlement` | `0x1854C6Cfb2e227750d6DC878a75e35597FeE475f` | **recon** — 31 methods, all 28 proof checks pass |
-| `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — 12 methods, superseded, kept for the record |
-| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **no reconciliation surface** |
-| `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — superseded |
-| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, superseded |
+| `contracts/ai_notary.py` | 12 | Attestation and consensus |
+| `contracts/notarized_settlement.py` | 31 | Escrow, trust list, settlement decision, payout reconciliation |
 
-The frontend points at **demo4**, not the original demo. It has to: the
-reconciliation methods (`confirm_payout`, `recover_payout`, `retry_payout`,
-`get_payout_state`, `set_payout_grace_seconds`, `get_unfunded_obligations`) exist
-only on a deployment built after the fix, and against the 25-method pair every one
-of them fails at the RPC while the page still renders controls for them.
+Everything below is an *instance* of those files. StudioNet cannot upgrade an
+Intelligent Contract, so a deployment is frozen at the moment it is built — which
+is why the table has a canonical pair and a graveyard, and why the addresses change
+whenever the source does.
+
+#### Canonical
+
+This is the pair to look at. The frontend reads it, it carries every method, and it
+includes the payout double-payment fix.
+
+| Contract | Address | Methods |
+|---|---|---|
+| `AINotary` | `0x2E637ab492620FB79f4aD4Ec5B74B32e16ca464F` | 12 |
+| `NotarizedSettlement` | `0x4Ba90319f06172e1D7382c706F9847B7c8A60816` | 31 |
+
+The wallet repository records this pair under two names — `demo4` and `recon` —
+because the reconciliation proof and the demo seed were pointed at the same
+deployment. They are **the same addresses**, not two deployments.
+
+#### Superseded
+
+Every earlier pair is gone from this README and from the deployment records. They
+remain on chain — StudioNet cannot delete a contract — but none is worth linking
+to, and the authoritative list is the one canonical pair above. The addresses
+remain resolvable in the commit history if an older note needs checking.
+
+The progression was not cosmetic. The first two pairs have **25 methods and no
+reconciliation surface at all**. Two later 31-method pairs pre-date the
+double-payment fix, so `recover_payout` could walk a delivered payout back into
+`owed` and the beneficiary could be paid twice. Only the canonical pair has it.
+
+The frontend points at the canonical pair, not at the original 25-method demo. It
+has to: the reconciliation methods (`confirm_payout`, `recover_payout`,
+`retry_payout`, `get_payout_state`, `set_payout_grace_seconds`,
+`get_unfunded_obligations`) exist only on a deployment built after the fix, and
+against a 25-method pair every one of them fails at the RPC while the page still
+renders controls for them.
 
 The curated records were **re-seeded**, not copied. The registry is append-only, so
 there is no way to move records between deployments — the six claims were
-re-notarized against the new pair's own notary. That cost a second pair and it is the
-reason the demo addresses changed.
+re-notarized against each new pair's own notary. That cost several deployments and
+it is the reason the demo addresses changed repeatedly.
 
-The demo pair is seeded so it demonstrates the whole delivery lifecycle rather than
-stopping halfway:
+The canonical pair is seeded so it demonstrates the whole delivery lifecycle rather
+than stopping halfway:
 
 | Escrow | State | Shows |
 |---|---|---|
-| #0 | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
-| #1 | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
+| delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
+| unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
 
 **Sweep.** `test_all_methods.py recon` reports
 `COVERAGE AUDIT PASSED — all 43 on-chain methods exercised (12 notary + 31
@@ -845,8 +870,8 @@ settlement)`, exit 0. It audits both directions against the on-chain schema, so 
 method that is added and never called fails the run — which is why the six new
 methods are exercised against a real funded, attested, settled escrow rather than
 merely invoked. The money path itself is proved separately by
-`prove_payout_reconciliation.py` (28 checks), because this sweep runs in a context
-where a failed reconcile would be indistinguishable from correct behaviour.
+`prove_payout_reconciliation.py`, because this sweep runs in a context where a
+failed reconcile would be indistinguishable from correct behaviour.
 
 **Why two deployments.** The registry is **append-only** — a notarised record
 cannot be edited or removed afterwards, which is the whole point of it. Running
