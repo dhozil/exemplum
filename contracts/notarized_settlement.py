@@ -1304,8 +1304,24 @@ class NotarizedSettlement(gl.Contract):
                 f"{ERROR_EXPECTED} escrow {escrow_id} was sent {age}s ago; "
                 f"wait {int(self.payout_grace_seconds) - age}s before recovering"
             )
-        if self.balance < s.balance_at_emit:
+        if self._delivered(s):
             # The funds are gone. This escrow is paid, whoever has yet to notice.
+            #
+            # This must be the same netted arithmetic `_delivered` uses, not a raw
+            # `self.balance < s.balance_at_emit`. The two disagree exactly when
+            # another escrow was funded after this one was emitted, and the raw
+            # form is the one that gives the wrong answer:
+            #
+            #   settle A -> sent, snapshot 1 GEN, and A's child resolves -> 0 GEN
+            #   fund B with 1 GEN                  -> balance 1 GEN, receipts +1
+            #   raw:      1 GEN < 1 GEN  -> False  -> recovery allowed
+            #   netted:   1 - 1 + 1 <= 1 -> True   -> delivered, refuse
+            #
+            # With the raw check, A's payout could be recovered and then resent,
+            # paying its payee a second time out of B's GEN. `confirm_payout`
+            # already consulted `_delivered`, so the two methods disagreed about
+            # whether the same escrow was paid, and the one that moved money was
+            # the wrong one.
             raise gl.vm.UserError(
                 f"{ERROR_EXPECTED} escrow {escrow_id} was delivered; confirm_payout instead"
             )
@@ -1368,10 +1384,15 @@ class NotarizedSettlement(gl.Contract):
         """Delivery status, kept apart from the commercial `state` on purpose."""
         s = self._must_get(escrow_id)
         age = _seconds_since(s.payout_sent_at) if s.payout_sent_at else 0
+        # `not _delivered(s)`, not a raw balance comparison: same reasoning as
+        # `recover_payout`. A raw check would report `recoverable: true` for an
+        # escrow whose money had already left and another escrow had since been
+        # funded, so the UI would offer a "recover" button that reverses a
+        # completed payment.
         recoverable = (
             s.payout_state == PAYOUT_SENT
             and age >= int(self.payout_grace_seconds)
-            and self.balance >= s.balance_at_emit
+            and not self._delivered(s)
         )
         return {
             "payout_state": s.payout_state,

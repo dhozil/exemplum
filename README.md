@@ -575,6 +575,28 @@ owner-settable (`set_payout_grace_seconds`) because how fast a network resolves
 children is not knowable at compile time — unlike `trust_warmup_hours`, lowering it
 *does* re-open the race, so it is not a convenience knob.
 
+**The first version of this was still exploitable, and it took an adversarial test
+to find it.** `recover_payout` originally refused on a raw
+`self.balance < s.balance_at_emit`, while `confirm_payout` consulted the netted
+`_delivered`. Those two disagree exactly when another escrow is funded after the
+first one was emitted:
+
+| Step | Balance | Snapshot | Raw check says | Netted check says |
+|---|---|---|---|---|
+| settle A -> `sent` | 1 GEN | 1 GEN | — | not delivered yet |
+| A's child resolves | 0 GEN | 1 GEN | delivered | delivered |
+| fund B with 1 GEN | **1 GEN** | 1 GEN | **recoverable** | delivered |
+
+With the raw check, `recover_payout` would have allowed recovering A *after its
+money had left*, the payee would call `retry_payout`, and they would be paid a
+second time — out of B's GEN. Two methods disagreed about whether the same escrow
+was paid, and the one that moved money was the wrong one.
+
+`recover_payout` and `get_payout_state`'s `recoverable` now both consult
+`_delivered`, so there is one arithmetic and no second opinion. Proven live by
+funding B after A's emit and confirming the manipulation really does put the
+balance back at the snapshot, then that recovery is still refused.
+
 `retry_payout` is beneficiary-only. It is their money, so nobody else has a reason
 to be able to trigger it, and the gate costs nothing in practice.
 
@@ -789,8 +811,8 @@ and the payout fix landed after the first two were deployed.
 
 | Contract | Address | Purpose |
 |---|---|---|
-| `AINotary` | `0x93Ca53Fed389F27cF6918fFD328a913ffB11AB59` | **demo3** — 12 methods. **The frontend's default.** |
-| `NotarizedSettlement` | `0x0AE692DC9f236fd91bfD8893Af40215b19D9ea68` | **demo3** — 31 methods, all 43 covered by the sweep |
+| `AINotary` | `0x2E637ab492620FB79f4aD4Ec5B74B32e16ca464F` | **demo4** — 12 methods. **The frontend's default.** |
+| `NotarizedSettlement` | `0x4Ba90319f06172e1D7382c706F9847B7c8A60816` | **demo4** — 31 methods, all 43 covered by the sweep |
 | `AINotary` | `0xa24126eA734c544d1c86B815Dbd83BD39d1ad4a5` | **recon** — 12 methods, carries the reconciliation proof |
 | `NotarizedSettlement` | `0x1854C6Cfb2e227750d6DC878a75e35597FeE475f` | **recon** — 31 methods, all 28 proof checks pass |
 | `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — 12 methods, superseded, kept for the record |
@@ -798,7 +820,7 @@ and the payout fix landed after the first two were deployed.
 | `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — superseded |
 | `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, superseded |
 
-The frontend points at **demo3**, not the original demo. It has to: the
+The frontend points at **demo4**, not the original demo. It has to: the
 reconciliation methods (`confirm_payout`, `recover_payout`, `retry_payout`,
 `get_payout_state`, `set_payout_grace_seconds`, `get_unfunded_obligations`) exist
 only on a deployment built after the fix, and against the 25-method pair every one
@@ -806,10 +828,10 @@ of them fails at the RPC while the page still renders controls for them.
 
 The curated records were **re-seeded**, not copied. The registry is append-only, so
 there is no way to move records between deployments — the six claims were
-re-notarized against demo3's own notary. That cost a second pair and it is the
+re-notarized against the new pair's own notary. That cost a second pair and it is the
 reason the demo addresses changed.
 
-demo3 is seeded so it demonstrates the whole delivery lifecycle rather than
+The demo pair is seeded so it demonstrates the whole delivery lifecycle rather than
 stopping halfway:
 
 | Escrow | State | Shows |

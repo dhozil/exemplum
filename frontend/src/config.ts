@@ -72,10 +72,10 @@ export const ZERO = '0x0000000000000000000000000000000000000000';
  * which is why the addresses changed.
  */
 export const NOTARY_ADDRESS = (env('VITE_NOTARY_ADDRESS') ??
-  '0x93Ca53Fed389F27cF6918fFD328a913ffB11AB59') as `0x${string}`;
+  '0x2E637ab492620FB79f4aD4Ec5B74B32e16ca464F') as `0x${string}`;
 
 export const SETTLEMENT_ADDRESS = (env('VITE_SETTLEMENT_ADDRESS') ??
-  '0x0AE692DC9f236fd91bfD8893Af40215b19D9ea68') as `0x${string}`;
+  '0x4Ba90319f06172e1D7382c706F9847B7c8A60816') as `0x${string}`;
 
 export function explorerTx(hash: string): string {
   return `${EXPLORER_URL}/tx/${hash}`;
