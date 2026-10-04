@@ -10,6 +10,11 @@ artifacts/
 # into this tree, or adds one for another network, still cannot commit it.
 .env
 .env.local
+# The adversarial proof records the pair it deployed, per machine. The canonical
+# addresses are in the README; this file is just a convenience so re-runs do not
+# deploy a new pair every time.
+deployment.json
+tests/adversarial/.env
 .env.*.local
 *.key
 

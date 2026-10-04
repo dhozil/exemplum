@@ -61,7 +61,7 @@ export const ZERO = '0x0000000000000000000000000000000000000000';
  * Point them at your own pair by setting VITE_NOTARY_ADDRESS and
  * VITE_SETTLEMENT_ADDRESS in the Vercel project's environment variables.
  *
- * The default is the 31-method `demo3` pair, not the older 25-method one. It has
+ * The default is the current 31-method pair, not the older 25-method one. It has
  * to be: Intelligent Contracts cannot be upgraded, so the payout reconciliation
  * surface (`confirm_payout`, `recover_payout`, `retry_payout`, `get_payout_state`,
  * `set_payout_grace_seconds`, `get_unfunded_obligations`) exists only on a
@@ -72,10 +72,10 @@ export const ZERO = '0x0000000000000000000000000000000000000000';
  * which is why the addresses changed.
  */
 export const NOTARY_ADDRESS = (env('VITE_NOTARY_ADDRESS') ??
-  '0x1716e0cA3C928577Aeb022385EBE0a4c4DbF2555') as `0x${string}`;
+  '0xfd9C9f574F6EBBB3386C17b1A165fa361934B991') as `0x${string}`;
 
 export const SETTLEMENT_ADDRESS = (env('VITE_SETTLEMENT_ADDRESS') ??
-  '0xd434794af83782d27e7b857D9B025E197Db4577A') as `0x${string}`;
+  '0x9B1aBfA03f0Be0e03596DFA25C00d35aD6b32B5E') as `0x${string}`;
 
 export function explorerTx(hash: string): string {
   return `${EXPLORER_URL}/tx/${hash}`;

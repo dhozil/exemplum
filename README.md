@@ -7,7 +7,7 @@
 **An automated notary for claims about the real world, and a settlement layer that pays out on its verdict.**
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
-[![Methods](https://img.shields.io/badge/on--chain%20methods-44-7E14FF?style=flat-square)](#api)
+[![Methods](https://img.shields.io/badge/on--chain%20methods-43-7E14FF?style=flat-square)](#api)
 [![Tests](https://img.shields.io/badge/tests-374-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
@@ -676,7 +676,8 @@ distribute money that was never escrowed.
 >
 > So a contract declaring them is not rejected at deploy time; it deploys and is
 > then permanently uncallable, by anyone, forever. That is a worse failure mode
-> than an outright rejection, and it is why the probe lives in the wallet repo
+> than an outright rejection, and it is why the probe is a script rather than a
+> test case
 > rather than being deleted.
 
 
@@ -687,7 +688,7 @@ distribute money that was never escrowed.
 
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
-contracts/notarized_settlement.py           32 methods  – escrow, trust list, settlement decision, payout reconciliation
+contracts/notarized_settlement.py           31 methods  – escrow, trust list, settlement decision, payout reconciliation
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
 tests/test_settlement.py                     111 direct-mode tests
@@ -750,17 +751,18 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 | Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
 | Frontend (`vitest`) | **110** | 11 files |
-| On-chain methods | **44** | 12 notary + 32 settlement, checked against the deployed schema |
+| On-chain methods | **43** | 12 notary + 31 settlement, checked against the deployed schema |
 
-`genvm-lint` is clean on both contracts, and every one of the 44 on-chain methods
+`genvm-lint` is clean on both contracts, and every one of the 43 on-chain methods
 has been called against a live deployment — the coverage audit compares what the
 script exercised against the schema the node returns, so a method added later
 without being tested shows up as a failure rather than passing silently.
 
 Six of the integration tests are **skipped on purpose**. They are the value
 transfer cases, and the `gltest` contract factory takes arguments but not value,
-so it cannot fund an escrow. The money path is covered instead by the
-`prove_*.py` scripts in the wallet repository, which move real GEN — see
+so it cannot fund an escrow. The money path is covered instead by
+[`tests/adversarial/prove_recovery.py`](#the-adversarial-test-and-one-thing-it-cannot-do),
+which is **in this repository** and moves real GEN — see
 [Money moves](#money-moves-testing-it-is-what-found-out-why-it-didnt).
 
 That is also why the sweep in this repository is not the primary proof. It cannot
@@ -811,7 +813,7 @@ GenLayer StudioNet. The authoritative source is these two files in this reposito
 | Source file | Methods | Role |
 |---|---|---|
 | `contracts/ai_notary.py` | 12 | Attestation and consensus |
-| `contracts/notarized_settlement.py` | 32 | Escrow, trust list, settlement decision, payout reconciliation |
+| `contracts/notarized_settlement.py` | 31 | Escrow, trust list, settlement decision, payout reconciliation |
 
 Everything below is an *instance* of those files. StudioNet cannot upgrade an
 Intelligent Contract, so a deployment is frozen at the moment it is built — which
@@ -825,12 +827,13 @@ includes the payout double-payment fix.
 
 | Contract | Address | Methods |
 |---|---|---|
-| `AINotary` | `0x1716e0cA3C928577Aeb022385EBE0a4c4DbF2555` | 12 |
-| `NotarizedSettlement` | `0xd434794af83782d27e7b857D9B025E197Db4577A` | 32 |
+| `AINotary` | `0xfd9C9f574F6EBBB3386C17b1A165fa361934B991` | 12 |
+| `NotarizedSettlement` | `0x9B1aBfA03f0Be0e03596DFA25C00d35aD6b32B5E` | 31 |
 
-The wallet repository records this pair under two names — `demo4` and `recon` —
-because the reconciliation proof and the demo seed were pointed at the same
-deployment. They are **the same addresses**, not two deployments.
+One pair, one address. Earlier revisions of this README recorded the same
+deployment twice under different local labels and referred to a separate local
+working directory that was never pushed — which is precisely how a reviewer ends
+up told a test exists that they cannot see.
 
 #### Superseded
 
@@ -864,57 +867,54 @@ than stopping halfway:
 | delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
 | unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
 
-#### Making the recovery path testable
+#### The adversarial test, and one thing it cannot do
 
-The recovery branch was, until this was written, **unreachable and therefore
-untested** — and the stewards had specifically asked for an adversarial test of
-failed transfer → returned funds → exactly-once recovery.
-
-It is unreachable because a failing outbound transfer needs a child transaction
-that errors, and nothing reachable on StudioNet produces one. Measured, not
-assumed:
-
-- an EOA accepts value;
-- **an Intelligent Contract's ghost contract accepts bare value too** — paying a
-  deployed `AINotary` delivered 1 GEN — despite `__receive__` being unavailable,
-  which had been read as meaning such a transfer would raise;
-- the contract's own funding invariants (`received <= amount`, no withdrawal) mean
-  the balance can never be short of a pending transfer.
-
-So the branch was correct and completely unexercised. `simulate_returned_payout`
-(owner-only) is the seam that makes it testable: it tells the contract to believe
-the value came back when it did not.
-
-**The cost is real and is not hidden.** That override makes `recover_payout`
-succeed on a payout whose money has actually left, and `retry_payout` will then
-send it again — so **the owner can double-pay a beneficiary.** It is owner-only
-because the owner already holds the trust list and the pause switch, and it is not
-scoped to a safe recipient because the mechanism turns entirely on whether the
-funds returned; a partial version of that belief is not a distinction that means
-anything. It creates no GEN: `received` and `total_received` are untouched.
-
-A contract holding real value should not ship this. It is here so the path the
-stewards asked about is provable, and it should be deleted the moment a genuinely
-failing transfer can be produced.
-
-With it, the sweep exercises the full path and the coverage audit is clean:
+`tests/adversarial/prove_recovery.py` is in this repository, runs against real
+GenVM, and moves real GEN:
 
 ```
-settle                     -> sent, not delivered
-simulate_returned_payout   -> delivered=False
-recover (grace 600s)       -> REFUSED: "wait 516s"
-grace shortened, elapsed   -> recoverable=True
-recover_payout             -> SUCCESS, owed, attempts=1
-listed in get_pending_payouts -> True
-retry_payout (not the beneficiary) -> REFUSED
+python tests/adversarial/prove_recovery.py            # against deployment.json
+python tests/adversarial/prove_recovery.py --deploy   # fresh pair first
 ```
 
-The grace period is exercised in both directions deliberately. A single short
-window cannot show the refusal at all: one write round-trips in 15-20s on this
-network, so a 15s grace has already elapsed before the next write is sent. An
-earlier version asserted the refusal would happen and the coverage audit caught
-the unexpected success — correctly, since the assertion was wrong, not the
-contract.
+It needs the SDK directly rather than `gltest`, because `gltest`'s contract factory
+builds every method as `lambda self, args=None: write_contract_wrapper(...)` with
+no `value` parameter and therefore cannot fund an escrow at all.
+
+All 28 checks pass, including: `settle` records `sent` and leaves
+`total_paid_out` alone; the escrow stays in `get_pending_payouts`; recovery is
+refused once the value has gone, and refused **for that reason** rather than for
+the grace period; `confirm_payout` moves the total exactly once and a second call
+does nothing; `owed` is reachable and is a live obligation; and every way into the
+recovery path is asserted closed.
+
+**What it cannot do: drive a successful recovery.** `recover_payout` needs
+`payout_state == sent` with the funds still in the contract, and the only such
+moment is between the child transaction being created and it resolving. Measured:
+the child resolves in roughly 15 seconds, and a single write on StudioNet
+round-trips in 15-20. The window is shorter than one transaction, so by the time a
+`recover_payout` is accepted the value has already left and it is correctly
+refused as delivered.
+
+The other route — a child transfer that genuinely fails — has no reachable
+trigger. An externally-owned account accepts value. So does an Intelligent
+Contract's ghost contract: paying a deployed `AINotary` delivered 1 GEN, measured,
+despite `__receive__` being unavailable on the runner, which had been read as
+meaning such a transfer would raise. And this contract's own invariants close the
+last door — `received` is capped at `amount`, and there is no withdrawal, so the
+balance can never be short of a pending transfer.
+
+An earlier attempt closed that gap with an owner-only method that told the
+contract to believe the value had come back. **It has been removed.** It made a
+delivered payout recoverable and let the owner pay a beneficiary twice out of the
+shared pool, and a submitted contract should not carry a method like that for the
+sake of a test. The method is gone, `test_all_methods.py` asserts it is absent
+from the on-chain schema, and `get_payout_state` no longer carries a
+`simulated_return` field.
+
+So the recovery machinery exists and every guard around it is proved, but the
+success path is unreachable on StudioNet rather than tested. That is a platform
+limitation, stated here rather than papered over.
 
 **Why two deployments.** The registry is **append-only** — a notarised record
 cannot be edited or removed afterwards, which is the whole point of it. Running

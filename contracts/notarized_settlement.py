@@ -165,34 +165,6 @@ class Settlement:
     # transaction has certainly resolved, "the balance is back" is ambiguous -
     # it is also what an in-flight transfer looks like.
     payout_sent_at: str
-    # TEST SEAM. Set by `simulate_returned_payout`, owner-only.
-    #
-    # This exists because the recovery path is otherwise **unreachable**, and that
-    # is the point worth being explicit about: a failed outbound transfer needs a
-    # child transaction that errors, and nothing reachable on StudioNet can make
-    # one. An EOA accepts value, an Intelligent Contract's ghost contract accepts
-    # bare value despite `__receive__` being unavailable, and this contract's own
-    # funding invariants (`received <= amount`, no withdrawal) mean the balance can
-    # never be short of a pending transfer. So the branch the stewards asked to be
-    # tested could not be tested, and leaving it unexercised would have meant
-    # reporting it as working.
-    #
-    # The security cost is real and is not hidden: this makes `recover_payout`
-    # succeed on a payout whose money has actually left, and `retry_payout` will
-    # then send it a second time. **The owner can use this to double-pay a
-    # beneficiary.** It is owner-only because the owner already holds the trust
-    # list and the pause switch, and because there is no way to scope it to a
-    # harmless recipient - the whole mechanism turns on whether the funds came
-    # back, so faking that for one escrow but not another is not a distinction
-    # that means anything.
-    #
-    # It adds no GEN. `received` is untouched, `total_received` is untouched, and
-    # the second payment comes out of the shared pool like any other. A contract
-    # holding real value should not ship this; it is here so the recovery path is
-    # provable, and it should be deleted once a real failing transfer can be
-    # produced.
-    payout_returned: bool
-
 
 def _as_address(value) -> Address:
     """Coerce to Address.
@@ -968,7 +940,6 @@ class NotarizedSettlement(gl.Contract):
             received_at_emit=u256(0),
             payout_attempts=u256(0),
             payout_sent_at="",
-            payout_returned=False,
         )
         if received > 0:
             self._bump("total_committed", int(received))
@@ -1192,9 +1163,6 @@ class NotarizedSettlement(gl.Contract):
         # escrows are funded. See `received_at_emit`.
         s.balance_at_emit = self.balance
         s.received_at_emit = self.total_received
-        # A new attempt is judged on the balance again, not on what the owner
-        # asserted about the previous one.
-        s.payout_returned = False
         try:
             # Via the ghost contract, not `gl.get_contract_at`: see _Recipient.
             # The internal-message form silently loses the value.
@@ -1242,14 +1210,9 @@ class NotarizedSettlement(gl.Contract):
         `unattributed` by `get_fund_conservation`. The grace period is what
         covers that case.
 
-        `payout_returned` is the owner's test seam overriding this to False. It
-        asserts that the funds came back when they did not, which is why it can
-        turn a delivered payout into a recoverable one. See that field.
         """
         if s.payout_state != PAYOUT_SENT:
             return s.payout_state == PAYOUT_DELIVERED
-        if s.payout_returned:
-            return False
         received_since = self.total_received
         if received_since > s.received_at_emit:
             received_since = received_since - s.received_at_emit
@@ -1298,7 +1261,6 @@ class NotarizedSettlement(gl.Contract):
             return PAYOUT_SENT
         s.payout_state = PAYOUT_DELIVERED
         s.payout_sent_at = ""
-        s.payout_returned = False
         # Guarded, so a second call cannot inflate the total. The state check
         # above returns early, and this makes the invariant local as well.
         self.total_paid_out = self.total_paid_out + s.received
@@ -1417,44 +1379,6 @@ class NotarizedSettlement(gl.Contract):
         self._emit_payout(s, beneficiary)
         return s.payout_state
 
-    @gl.public.write
-    def simulate_returned_payout(self, escrow_id: u256) -> str:
-        """Owner-only TEST SEAM. Pretend a failed transfer returned its value.
-
-        Exists so the recovery path can be exercised at all, and it should not
-        exist. Read the note on `Settlement.payout_returned` before using it.
-
-        The recovery path is gated on the funds being *back in the contract*, and
-        on StudioNet no reachable transfer can fail: an EOA takes value, an
-        Intelligent Contract's ghost contract takes bare value too (despite
-        `__receive__` being unavailable), and this contract's funding invariants
-        mean the balance can never be short of a pending transfer. So
-        `recover_payout` was correct, and completely untested.
-
-        This is the blunt version of making it testable: it tells the contract to
-        believe the value came back when it did not. That is a lie, and it has a
-        consequence - `retry_payout` will send the money a second time, so the
-        **owner can double-pay a beneficiary**. It is deliberately not scoped to a
-        safe recipient, because the mechanism turns on whether the funds returned
-        and a partial version of that belief is not a distinction that means
-        anything.
-
-        No GEN is created. `received` and `total_received` are untouched and the
-        retry draws on the shared pool exactly as a real recovery would.
-        """
-        if gl.message.sender_address != self.owner:
-            raise gl.vm.UserError(
-                f"{ERROR_PERMISSION} only the owner can simulate a returned payout"
-            )
-        s = self._must_get(escrow_id)
-        if s.payout_state != PAYOUT_SENT:
-            raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} escrow {escrow_id} has no payout in flight: "
-                f"{s.payout_state}"
-            )
-        s.payout_returned = True
-        return PAYOUT_OWED
-
     @gl.public.view
     def get_payout_state(self, escrow_id: u256) -> dict:
         """Delivery status, kept apart from the commercial `state` on purpose."""
@@ -1492,7 +1416,6 @@ class NotarizedSettlement(gl.Contract):
             ),
             "unreconciled_payouts": self._payout_in_flight(),
             "grace_seconds": self.payout_grace_seconds,
-            "simulated_return": s.payout_returned,
         }
 
     @gl.public.write
