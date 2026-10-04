@@ -864,7 +864,18 @@ than stopping halfway:
 | delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
 | unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
 
-**Sweep.** `test_all_methods.py recon` reports
+**One check is unreachable, and it is worth naming.** `retry_payout` is
+beneficiary-only, and that permission gate cannot be exercised here. Reaching
+`owed` while still funded requires a *successful* `recover_payout`, which requires
+a child transfer that genuinely failed and returned its value — underfunding gets
+an escrow to `owed` but fails the funding check first. So a sweep call on
+`retry_payout` lands on the state gate, not the permission gate.
+
+That gate is defence in depth on a path which only opens on failure. It is
+deliberately not tested by pretending otherwise: the sweep asserts the reachable
+check and says so, rather than reporting a permission test that never ran.
+
+**Sweep.** `test_all_methods.py` reports
 `COVERAGE AUDIT PASSED — all 43 on-chain methods exercised (12 notary + 31
 settlement)`, exit 0. It audits both directions against the on-chain schema, so a
 method that is added and never called fails the run — which is why the six new
