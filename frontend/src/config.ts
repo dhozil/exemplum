@@ -60,12 +60,22 @@ export const ZERO = '0x0000000000000000000000000000000000000000';
  *
  * Point them at your own pair by setting VITE_NOTARY_ADDRESS and
  * VITE_SETTLEMENT_ADDRESS in the Vercel project's environment variables.
+ *
+ * The default is the 31-method `demo3` pair, not the older 25-method one. It has
+ * to be: Intelligent Contracts cannot be upgraded, so the payout reconciliation
+ * surface (`confirm_payout`, `recover_payout`, `retry_payout`, `get_payout_state`,
+ * `set_payout_grace_seconds`, `get_unfunded_obligations`) exists only on a
+ * deployment built after the fix. Against the old pair every one of those reads
+ * and writes fails, and the settlement detail page would render a delivery panel
+ * whose controls cannot work. The registry is append-only, so the curated records
+ * could not be copied forward — they were re-seeded onto the new pair instead,
+ * which is why the addresses changed.
  */
 export const NOTARY_ADDRESS = (env('VITE_NOTARY_ADDRESS') ??
-  '0x6541E1eEa84d012ad6D5FB7393D8161b504071f3') as `0x${string}`;
+  '0x93Ca53Fed389F27cF6918fFD328a913ffB11AB59') as `0x${string}`;
 
 export const SETTLEMENT_ADDRESS = (env('VITE_SETTLEMENT_ADDRESS') ??
-  '0xf1C2338f354384da7ff1eD739201Af6BC8BD4653') as `0x${string}`;
+  '0x0AE692DC9f236fd91bfD8893Af40215b19D9ea68') as `0x${string}`;
 
 export function explorerTx(hash: string): string {
   return `${EXPLORER_URL}/tx/${hash}`;

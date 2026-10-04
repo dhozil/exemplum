@@ -741,7 +741,15 @@ so it cannot fund an escrow. The money path is covered instead by the
 `prove_*.py` scripts in the wallet repository, which move real GEN — see
 [Money moves](#money-moves-testing-it-is-what-found-out-why-it-didnt).
 
-The settlement integration suite runs against StudioNet: **23 of 23 pass**. It
+That is also why the sweep in this repository is not the primary proof. It cannot
+fund an escrow either, so against it every reconciliation method is exercised as
+a *rejection* — and a contract that refused everything would pass just as
+cleanly. `test_all_methods.py` proves the surface exists and behaves; it does not
+prove the money arrives. `prove_payout_reconciliation.py` does that, on a real
+deployment, with GEN that moves.
+
+The settlement integration suite runs against StudioNet: **23 of 23 pass**, and the
+payout reconciliation suite alongside it **11 of 11**. It
 could not run at all for most of this work, and the cause turned out to be
 narrower than first recorded. **Deploying does not require ASCII source.**
 deploy_contract passes the code through serialize(), which is happy with
@@ -776,39 +784,47 @@ genlayer schema <address>             # confirm all methods are exposed
 
 ### Current deployment
 
-GenLayer StudioNet.
+GenLayer StudioNet. Three pairs, because Intelligent Contracts cannot be upgraded
+and the payout fix landed after the first two were deployed.
 
 | Contract | Address | Purpose |
 |---|---|---|
-| `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — curated records, what the frontend reads |
-| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **pre-reconciliation** |
-| `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — target of the full method sweep |
-| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, **pre-reconciliation** |
+| `AINotary` | `0x93Ca53Fed389F27cF6918fFD328a913ffB11AB59` | **demo3** — 12 methods. **The frontend's default.** |
+| `NotarizedSettlement` | `0x0AE692DC9f236fd91bfD8893Af40215b19D9ea68` | **demo3** — 31 methods, all 43 covered by the sweep |
 | `AINotary` | `0xa24126eA734c544d1c86B815Dbd83BD39d1ad4a5` | **recon** — 12 methods, carries the reconciliation proof |
 | `NotarizedSettlement` | `0x1854C6Cfb2e227750d6DC878a75e35597FeE475f` | **recon** — 31 methods, all 28 proof checks pass |
+| `AINotary` | `0x6541E1eEa84d012ad6D5FB7393D8161b504071f3` | **demo** — 12 methods, superseded, kept for the record |
+| `NotarizedSettlement` | `0xf1C2338f354384da7ff1eD739201Af6BC8BD4653` | **demo** — 25 methods, **no reconciliation surface** |
+| `AINotary` | `0xC43EB0d735b3C2B8D83c561565844b8bCc652BF5` | **test** — superseded |
+| `NotarizedSettlement` | `0xee48C5C6373d480e0bB01009E39012Aebd4132c1` | **test** — 25 methods, superseded |
 
-The demo and test pairs predate the reconciliation fix: Intelligent Contracts
-cannot be upgraded, so `confirm_payout` / `recover_payout` / `retry_payout` /
-`get_payout_state` / `get_unfunded_obligations` exist only on the recon pair. The
-frontend's no-env default still points at demo, so the delivery panel reads as
-"no payout lifecycle has started" there rather than pretending. **Repointing demo
-at a reconciliation deployment is the remaining step before submission.**
+The frontend points at **demo3**, not the original demo. It has to: the
+reconciliation methods (`confirm_payout`, `recover_payout`, `retry_payout`,
+`get_payout_state`, `set_payout_grace_seconds`, `get_unfunded_obligations`) exist
+only on a deployment built after the fix, and against the 25-method pair every one
+of them fails at the RPC while the page still renders controls for them.
 
-Deployed and verified by schema — 12 and 25 methods on demo/test, 12 and 31 on
-recon, each matching `genvm-lint` for the source it was built from. The
-stale-verdict fix is proven against real GenVM by
-`D:\Genlayer-project\wallet\prove_verdict_refresh.py`, and the reconciliation by
-`prove_payout_reconciliation.py` (2 GEN moved per run across two escrows, all 28
-checks pass, and the harness is re-runnable against the same pair).
+The curated records were **re-seeded**, not copied. The registry is append-only, so
+there is no way to move records between deployments — the six claims were
+re-notarized against demo3's own notary. That cost a second pair and it is the
+reason the demo addresses changed.
 
-**Coverage is audited, not asserted.** `test_all_methods.py` used to end with a
-hard-coded `f"… of 27 contract methods covered"`, which counted the calls it
-happened to make and could not notice a method that had been added and never
-exercised. It called 17 of them. It now diffs the methods it invoked against the
-**on-chain schema** in both directions and exits non-zero on any gap. That check
-is what caught three bugs in the harness itself while writing this — including a
-`revoke_notary_trust` call with the wrong arity and a "mismatched record" probe
-that silently stopped testing anything once the test pair had been reused.
+demo3 is seeded so it demonstrates the whole delivery lifecycle rather than
+stopping halfway:
+
+| Escrow | State | Shows |
+|---|---|---|
+| #0 | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
+| #1 | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
+
+**Sweep.** `test_all_methods.py recon` reports
+`COVERAGE AUDIT PASSED — all 43 on-chain methods exercised (12 notary + 31
+settlement)`, exit 0. It audits both directions against the on-chain schema, so a
+method that is added and never called fails the run — which is why the six new
+methods are exercised against a real funded, attested, settled escrow rather than
+merely invoked. The money path itself is proved separately by
+`prove_payout_reconciliation.py` (28 checks), because this sweep runs in a context
+where a failed reconcile would be indistinguishable from correct behaviour.
 
 **Why two deployments.** The registry is **append-only** — a notarised record
 cannot be edited or removed afterwards, which is the whole point of it. Running
