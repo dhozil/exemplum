@@ -103,6 +103,17 @@ leader and validators agreed it errored
 - sender kept 0; `__on_errored_message__` never fired (`calls = 0`,
   re-read 10+ minutes after finalization).
 
+Verify on the Studio explorer:
+
+- failing child (errored by consensus, value still credited):
+  https://explorer-studio.genlayer.com/tx/0x7a6582c2f65c3cc1adad6fc8f30a2d3d71eec70cf5aa7c9702b98207fb327761
+- parent emit (1 GEN message to the reverting method):
+  https://explorer-studio.genlayer.com/tx/0x4f923b546508d71355e0c9da0eb1c430212f1ce5bef61e1a448f57834f9ce65b
+- probe sender (hook `calls = 0`, `refunded = 0`):
+  0xc577E378F4f3e30573068FF154CFa53C58f4AC92
+- probe receiver (+1 GEN despite the error):
+  0xfF3Fe897B72E7E96bA349245361Ab8C2101AF42D
+
 So on StudioNet a failed child does not return value through any path: value
 follows the message, not the error. The hook override stays as defense in
 depth for runners behaving per the SDK wording; delivery truth comes from
