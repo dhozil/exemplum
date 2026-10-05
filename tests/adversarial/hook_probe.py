@@ -18,10 +18,37 @@ rather than automatically. That is why NotarizedSettlement overrides the hook
 instead of inferring delivery from its balance, and this probe is the measurement
 that the inference is unnecessary.
 
-Trigger: an INTERNAL message carrying value to an Intelligent Contract that
-defines no __receive__ and no __handle_undefined_method__. The special-methods
-dispatch diagram documents that path as an error - value present, no method name,
-no __receive__ - so the child fails and the value is refunded to the sender.
+Trigger, and four attempts at it
+-------------------------------
+An internal value-bearing message to a contract whose receiving method reverts
+on purpose. The emit has to succeed - the sender needs the value and the callee
+needs to blow up - so that the CHILD is what fails, which is the only thing that
+exercises the refund path.
+
+Measured on StudioNet, all four of these fail at EMIT time with a bare
+`exit_code 1`, so no child transaction is ever created and the hook has nothing
+to react to:
+
+1. internal `emit(value=..., on="finalized")` to a contract with no `__receive__`
+   and no `__handle_undefined_method__`
+2. the same, via `emit_transfer(value=..., on="finalized")` instead
+3. the same, to a payable `__handle_undefined_method__` (lint accepts this one,
+   but a payable fallback absorbs the value, so the child succeeds)
+4. the same, to a method that reverts deliberately, with `use_balance=True`
+
+The non-payable variant of (3) is what the dispatch diagram describes as the
+error path, and lint refuses it outright: "Public method
+'__handle_undefined_method__' cannot start with '__'". So the one documented
+child-side failure cannot be constructed.
+
+The external path always succeeds. Paying an externally-owned account works, and
+so does paying an Intelligent Contract's ghost contract - 1 GEN to a deployed
+`AINotary` was measured arriving. There is no reachable recipient that refuses a
+transfer.
+
+So on StudioNet a payout cannot be made to fail from the outside. That is a good
+property for the money and a bad one for testing: the refund path is real but not
+exercisable here.
 
 Two things about deploying an inline contract, both learned the hard way here:
 
@@ -54,8 +81,9 @@ GEN = 10**18
 HEADER = ('# { "Depends": '
           '"py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }')
 
-# No __receive__, no __handle_undefined_method__. A value-bearing message to this
-# must error, per the documented dispatch graph.
+# A payable method that always reverts. The point is the CHILD failing, not the
+# emit: to exercise the platform refund path the emit must succeed first, which
+# means the sender needs the value and the callee needs to blow up.
 RECEIVER = """# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -66,8 +94,13 @@ class Receiver(gl.Contract):
         pass
 
     @gl.public.write.payable
-    def poke(self) -> None:
-        pass
+    def boom(self) -> None:
+        # Reverts on purpose. The emit succeeds because the sender has the value,
+        # then the CHILD fails - which is the only way to exercise the platform's
+        # refund path. Targeting a contract that simply cannot receive a bare
+        # transfer does not work: the internal emit itself errors, so no child is
+        # ever created.
+        raise Exception("deliberate failure to exercise the refund path")
 """.lstrip()
 
 SENDER = """# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
@@ -89,7 +122,10 @@ class Sender(gl.Contract):
 
     @gl.public.write
     def send_internal(self, target: Address) -> None:
-        gl.get_contract_at(target).emit(value=self.balance, on="finalized")
+        gl.get_contract_at(target).emit_transfer(
+            value=self.balance, use_balance=True, on="finalized"
+        )
+        
 
     @gl.public.view
     def refunded_amount(self) -> u256:
