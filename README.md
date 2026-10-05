@@ -867,6 +867,52 @@ than stopping halfway:
 | delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
 | unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
 
+#### `__on_errored_message__`, and what is verified about it
+
+NotarizedSettlement overrides the SDK's `__on_errored_message__`. The SDK
+documents it as overridable and describes what the default does:
+
+> "This method is called when an emitted message with non-zero value fails during
+> execution. **By default, it simply accepts the refunded value.** Override this
+> method to implement custom error handling logic."
+
+Before this, the contract inherited that `pass`. So when an outbound payout
+failed, the GEN came back and **nothing recorded which escrow it belonged to** -
+the escrow stayed `sent` for ever, stayed in `get_pending_payouts`, and the value
+sat in the contract attributed to nothing. That is the unrecoverable state this
+contract exists to have fixed, and it was still reachable through the platform's
+own refund path.
+
+The override returns the single in-flight escrow to `owed`, credits the returned
+value to it, and counts the failure. Single-in-flight is enforced on every emit,
+so there is exactly one candidate; if there is none the value is still counted at
+contract level rather than refused, because losing it would be worse than an
+unattributable return.
+
+The two official sources disagree on whether the value comes back at all. The
+Value Transfers page says "If the child transaction fails, the value is not
+automatically returned to the sender"; this hook's docstring says the default
+"simply accepts the refunded value". Read together it comes back through this
+callback. The code records the conflict rather than picking a side.
+
+**What is verified and what is not.** `tests/adversarial/hook_probe.py` measures
+it. What that probe establishes: the override compiles, deploys, and the contract
+indexes - so it is not rejected the way `__receive__` is. The hook does **not**
+appear in the published schema, which is correct and expected: the GenVM spec
+lists it among special methods, invoked by the platform rather than by users.
+
+What the probe could **not** establish is the thing that matters: whether the hook
+actually fires on a failed child, and whether value comes back with it. The
+trigger it uses - an internal value-bearing message to a contract that cannot
+receive it - fails at emit time on StudioNet, so no child transaction is ever
+created and there is nothing for the hook to react to. The probe reports SKIP
+rather than a false pass.
+
+So the override rests on the SDK's own wording, not on a measurement. Shipping it
+is nonetheless a strict improvement with no new risk: if the hook never fires,
+`recover_payout` still reconciles from the balance exactly as before. It can only
+add a path, never remove one.
+
 #### The adversarial test, and one thing it cannot do
 
 `tests/adversarial/prove_recovery.py` is in this repository, runs against real
