@@ -1026,49 +1026,54 @@ class NotarizedSettlement(gl.Contract):
         is a fact worth surfacing rather than a reason to throw the money away.
         """
         self.total_returned_value = self.total_returned_value + gl.message.value
-        candidate = self._only_payout_in_flight()
-        if candidate is None:
+        found_id = self._only_payout_in_flight_id()
+        if found_id is None:
             return
-        candidate.payout_state = PAYOUT_OWED
-        candidate.transfer_emitted = False
-        candidate.returned_value = candidate.returned_value + gl.message.value
-        candidate.failed_payouts = candidate.failed_payouts + 1
+        escrow = self.settlements.get(found_id, None)
+        if escrow is None:
+            return
+        escrow.payout_state = PAYOUT_OWED
+        escrow.transfer_emitted = False
+        escrow.returned_value = escrow.returned_value + gl.message.value
+        escrow.failed_payouts = escrow.failed_payouts + 1
 
-    def _only_payout_in_flight(self):
-        """The single `sent` escrow, or None if there is not exactly one.
+    def _only_payout_in_flight_id(self):
+        """The id of the single `sent` escrow, or None if not exactly one.
 
         Safe because `_emit_payout` refuses to emit while another payout is
-        un-reconciled, so two escrows can never both be `sent`.
+        un-reconciled, so two escrows can never both be `sent`. Returns the id
+        (not the object) so the caller re-reads from storage before mutating,
+        which keeps the write path explicit rather than relying on a held
+        reference.
         """
-        found = None
+        found_id = None
         i = u256(0)
         total = self.next_id
         while i < total:
             other = self.settlements.get(i, None)
             if other is not None and other.payout_state == PAYOUT_SENT:
-                if found is not None:
+                if found_id is not None:
                     return None
-                found = other
+                found_id = u256(i)
             i += 1
-        return found
+        return found_id
 
-    # NOTE, on hooks. `gl.Contract` already defines `__on_errored_message__` as
-    # a public payable method with a `pass` body - "by default, it simply accepts
-    # the refunded value" - so this contract inherits a refund handler for free
-    # and a failed outbound payout has its GEN returned rather than burned. It is
-    # deliberately NOT redefined here: GenVM rejects any public method whose name
-    # starts with "__", and redefining is not the same thing as inheriting. An
-    # earlier note here claimed the hooks were unavailable on any runnable runner,
-    # which was wrong; the lint error had only ever spoken about redefining.
-    #
-    # `__receive__` is the genuinely absent half. It is declared abstract on the
-    # base class and cannot be overridden for the same lint reason, so a bare
-    # value-only transfer with no method name raises instead of being accepted.
-    # That is the desired behaviour for this contract: funds arrive through
-    # `open_settlement` / `fund_settlement`, which carry an escrow id, and a
-    # bare transfer carries none. Value a user attaches to a transaction that
-    # reverts still lands here with nothing to attribute it to, which is a real
-    # limitation rather than a platform one.
+    def _only_payout_in_flight(self):
+        """Backwards-compatible accessor returning the object, if any."""
+        found_id = self._only_payout_in_flight_id()
+        if found_id is None:
+            return None
+        return self.settlements.get(found_id, None)
+
+    # NOTE on hooks. `gl.Contract` defines `__on_errored_message__` as a public
+    # payable method whose default body accepts the refunded value, and the SDK
+    # documents it as overridable for custom error handling. Overriding it here
+    # is intentional and passes `genvm-lint check` on the pinned runner; the
+    # method is excluded from the published schema (31 methods) because the
+    # platform invokes it rather than users. `__receive__` is the genuinely
+    # absent half: declaring it makes the contract uncallable, so bare
+    # value-only transfers without an escrow id are refused, which is the
+    # desired behaviour for this contract.
 
     def _take_verdict(self, s: Settlement, record: dict) -> str:
         """Adopt a notary record's *current* verdict onto the escrow.
@@ -1438,9 +1443,9 @@ class NotarizedSettlement(gl.Contract):
                 f"{s.received} of {s.amount}"
             )
         beneficiary = s.payee if s.outcome == OUTCOME_PAY_WORKER else s.payer
-        if gl.message.sender_address != _as_address(beneficiary):
+        if str(gl.message.sender_address) != str(_as_address(beneficiary)):
             raise gl.vm.UserError(
-                f"{ERROR_PERMISSION} only the beneficiary can retry escrow {escrow_id}"
+                f"{ERROR_EXPECTED} only the beneficiary can retry escrow {escrow_id}"
             )
         self._emit_payout(s, beneficiary)
         return s.payout_state

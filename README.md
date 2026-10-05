@@ -827,8 +827,8 @@ includes the payout double-payment fix.
 
 | Contract | Address | Methods |
 |---|---|---|
-| `AINotary` | `0xfd9C9f574F6EBBB3386C17b1A165fa361934B991` | 12 |
-| `NotarizedSettlement` | `0x9B1aBfA03f0Be0e03596DFA25C00d35aD6b32B5E` | 31 |
+| `AINotary` | `0x1DE6751acf789FA1F09e0F1E78dE12f1db3E5256` | 12 |
+| `NotarizedSettlement` | `0x3cEBfEf9075052b4de0897B2350595F5c8b1FA61` | 31 |
 
 One pair, one address. Earlier revisions of this README recorded the same
 deployment twice under different local labels and referred to a separate local
@@ -845,7 +845,12 @@ remain resolvable in the commit history if an older note needs checking.
 The progression was not cosmetic. The first two pairs have **25 methods and no
 reconciliation surface at all**. Two later 31-method pairs pre-date the
 double-payment fix, so `recover_payout` could walk a delivered payout back into
-`owed` and the beneficiary could be paid twice. Only the canonical pair has it.
+`owed` and the beneficiary could be paid twice. The previous canonical pair
+fixed that but still carried a `NameError` on the stranger-retry path
+(`ERROR_PERMISSION` was never defined, so a non-beneficiary retry crashed
+instead of being refused cleanly). Only the current canonical pair has both
+fixes, proven by `tests/adversarial/prove_recovery.py` (28 checks, all
+passing, 2026-10-05) and `tests/test_payout_adversarial.py` (10 tests).
 
 The frontend points at the canonical pair, not at the original 25-method demo. It
 has to: the reconciliation methods (`confirm_payout`, `recover_payout`,
@@ -892,31 +897,40 @@ unattributable return.
 The two official sources disagree on whether the value comes back at all. The
 Value Transfers page says "If the child transaction fails, the value is not
 automatically returned to the sender"; this hook's docstring says the default
-"simply accepts the refunded value". Read together it comes back through this
-callback. The code records the conflict rather than picking a side.
+"simply accepts the refunded value". Measured on StudioNet, the docs page is
+the one that describes what happens - and more strongly than it claims
+(see below). The code keeps the override anyway: it can only add a path,
+never remove one.
 
-**What is verified and what is not.** `tests/adversarial/hook_probe.py` measures
-it. What that probe establishes: the override compiles, deploys, and the contract
-indexes - so it is not rejected the way `__receive__` is. The hook does **not**
-appear in the published schema, which is correct and expected: the GenVM spec
-lists it among special methods, invoked by the platform rather than by users.
+**Measured, 2026-10-05, on StudioNet with real GEN**
+(`tests/adversarial/probe_hook_fire.py`: sender `0xc577…C92`,
+receiver `0xfF3F…AF42`, failing child `0x7a65…67761`).
+A 1 GEN internal message calling a payable method that reverts with
+`[EXPECTED]` was emitted successfully, the child was created, leader and
+validators agreed it errored - and the outcome was:
 
-What the probe could **not** establish is the thing that matters: whether the hook
-actually fires on a failed child, and whether value comes back with it. The
-trigger it uses - an internal value-bearing message to a contract that cannot
-receive it - fails at emit time on StudioNet, so no child transaction is ever
-created and there is nothing for the hook to react to. The probe reports SKIP
-rather than a false pass.
+- the receiver was credited the full 1 GEN anyway (`value_credited: true`,
+  receiver balance 0 -> 1 GEN);
+- the sender kept 0 and `__on_errored_message__` never fired
+  (`calls = 0`, `refunded = 0`, re-read 10+ minutes after finalization).
 
-So the override rests on the SDK's own wording, not on a measurement. Shipping it
-is nonetheless a strict improvement with no new risk: if the hook never fires,
-`recover_payout` still reconciles from the balance exactly as before. It can only
-add a path, never remove one.
+So on this network a failed child does not return its value through any
+path: the value follows the message, not the error. The "returned funds"
+branch the hook exists for is unreachable here rather than merely untested,
+which is why `recover_payout` reconciles from the balance instead of waiting
+for a callback, and why the deterministic adversarial suite
+(`tests/test_payout_adversarial.py`, 10 tests) drives the hook as the
+platform would invoke it rather than claiming a live refund it cannot
+produce. The hook stays as defense in depth for runners that behave per the
+SDK wording; if it never fires, nothing is lost.
 
-#### The adversarial test, and one thing it cannot do
+#### The adversarial tests: one live, one deterministic
 
-`tests/adversarial/prove_recovery.py` is in this repository, runs against real
-GenVM, and moves real GEN:
+Two suites cover the failed-transfer path from opposite sides, because neither
+side alone can reach it on StudioNet.
+
+**Live** — `tests/adversarial/prove_recovery.py` runs against real GenVM with
+real GEN (28 checks, all passing on the canonical pair, 2026-10-05):
 
 ```
 python tests/adversarial/prove_recovery.py            # against deployment.json
@@ -934,17 +948,29 @@ the grace period; `confirm_payout` moves the total exactly once and a second cal
 does nothing; `owed` is reachable and is a live obligation; and every way into the
 recovery path is asserted closed.
 
-**What it cannot do: drive a successful recovery.** `recover_payout` needs
-`payout_state == sent` with the funds still in the contract, and the only such
-moment is between the child transaction being created and it resolving. Measured:
-the child resolves in roughly 15 seconds, and a single write on StudioNet
-round-trips in 15-20. The window is shorter than one transaction, so by the time a
-`recover_payout` is accepted the value has already left and it is correctly
-refused as delivered.
+**Deterministic** — `tests/test_payout_adversarial.py` runs under plain
+`pytest`, no network, no GEN (10 tests). It sets up exactly the storage
+`settle()` writes, then drives the real `__on_errored_message__`,
+`recover_payout`, `retry_payout` and `confirm_payout` through the full
+failed-transfer -> returned-funds -> exactly-once-recovery chain, including a
+stranger-retry refusal (the `ERROR_PERMISSION` crash used to live exactly
+there) and a chained end-to-end case.
 
-The other route — a child transfer that genuinely fails — has no reachable
-trigger. An externally-owned account accepts value. So does an Intelligent
-Contract's ghost contract: paying a deployed `AINotary` delivered 1 GEN, measured,
+**What even the two together cannot do: produce a genuinely failing payout
+child on StudioNet.** `recover_payout` needs `payout_state == sent` with the
+funds still in the contract, and the only such moment is between the child
+transaction being created and it resolving. Measured: the child resolves in
+roughly 15 seconds, and a single write on StudioNet round-trips in 15-20. The
+window is shorter than one transaction, so by the time a `recover_payout` is
+accepted the value has already left and it is correctly refused as delivered.
+
+The other route — a child transfer that genuinely fails — was actively
+attempted with real GEN (`tests/adversarial/probe_hook_fire.py`, failing
+child `0x7a65…67761`). A 1 GEN call to a payable method that reverts was
+emitted, created, and agreed by consensus to have errored — and the recipient
+was credited the full 1 GEN anyway while `__on_errored_message__` never fired.
+An externally-owned account accepts value. So does an Intelligent Contract's
+ghost contract: paying a deployed `AINotary` delivered 1 GEN, measured,
 despite `__receive__` being unavailable on the runner, which had been read as
 meaning such a transfer would raise. And this contract's own invariants close the
 last door — `received` is capped at `amount`, and there is no withdrawal, so the
