@@ -83,7 +83,11 @@ only verdict, confidence, corroboration and contradiction (tolerance +-1 on
 the counts). Quote, reasoning and content hash are leader-written record,
 labelled as such in the README consensus table, in
 `frontend/src/components/EquivalenceOutput.tsx` (with a frontend test
-forbidding the old claim), and in `frontend/src/pages/HowItWorks.tsx`.
+forbidding the old claim), in `frontend/src/pages/HowItWorks.tsx` step 03
+("reasoning text and excerpts are never compared"), and in the landing-page
+lede (`frontend/src/pages/Landing.tsx`), which previously joined the agreed
+verdict and the accompanying excerpts in one sentence and has been split so
+the excerpts are explicitly called committee record, never agreed on.
 Corrected submission wording:
 
 > Validators reach consensus only on the verdict, the confidence bucket, and
