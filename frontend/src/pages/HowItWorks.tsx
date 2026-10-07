@@ -76,8 +76,9 @@ export default function HowItWorks() {
                 The verdict and the confidence bucket must match exactly, because those are what gets
                 stored and acted on. The corroboration and contradiction counts are allowed to differ
                 by one, because a page gaining a comment between two fetches is a real and harmless
-                difference. Reasoning text is never compared — two careful validators will word it
-                differently, and that is fine.
+                difference. Reasoning text and excerpts are never compared — two careful validators will
+                word them differently, and that is fine. The quote is the committee&apos;s record of
+                what it read, not something consensus verified.
               </p>
             </div>
           </li>

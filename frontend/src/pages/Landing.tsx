@@ -45,8 +45,9 @@ export default function Landing() {
             <h1 className="rise rise--2">When a page says something, this is the receipt.</h1>
             <p className="lede rise rise--3">
               You state the claim and point at two or more sources. A committee of validators fetches
-              each one, judges it against what it reads, and agrees on a verdict — which goes on chain
-              with the excerpts, the content hashes and a timestamp.
+              each one, judges it against what it reads, and agrees on a verdict. The verdict goes
+              on chain with the excerpts, the content hashes and a timestamp — the excerpts are the
+              committee&apos;s record of what it read, not something validators agreed on.
             </p>
             <div className="cluster rise rise--4" style={{ marginTop: 'var(--s-5)' }}>
               <Link className="btn" to="/notarize">
