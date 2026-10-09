@@ -56,6 +56,13 @@ from gltest.clients import get_gl_client
 #     D:\Genlayer-project\wallet\prove_refund_payout.py     the refund direction
 #
 # Re-enable once the harness threads `value` through the factory.
+#
+# NOTE (partially funded lifecycle fix): the `settle` calls below assert
+# success on escrows this harness cannot fund. `settle` now refuses anything
+# short of full funding, so if this file is ever un-skipped those assertions
+# must become refusals, with the funded path proven as in
+# tests/adversarial/prove_recovery.py. Left as-is while skipped rather than
+# edited speculatively.
 pytestmark = pytest.mark.skip(reason="gltest cannot send value (see module docstring)")
 
 SOURCES = [

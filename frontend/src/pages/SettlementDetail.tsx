@@ -9,6 +9,7 @@ import {
   getSettlement,
   fundSettlement,
   getVerdictFreshness,
+  reclaimFunds,
   recoverPayout,
   refreshVerdict,
   requestReevaluation,
@@ -118,7 +119,7 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
     gap > 0n ? (gap > TEN_GEN ? TEN_GEN : gap) : 0n,
   );
   const [pending, setPending] = useState<
-    'attach' | 'settle' | 'refresh' | 'reval' | 'fund' | 'payout' | null
+    'attach' | 'settle' | 'refresh' | 'reval' | 'fund' | 'payout' | 'reclaim' | null
   >(null);
 
   async function doFundTopUp() {
@@ -142,6 +143,34 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
 
   const canWrite = account.address !== null && !busy;
   const deadlinePassed = isPast(s.deadline);
+  const isPayer =
+    account.address !== null && account.address.toLowerCase() === s.payer.toLowerCase();
+  /* A payer refund is enforceable while the escrow is unsettled and short:
+     open escrows reclaim immediately, attested ones once the window closes so
+     the worker keeps the full window to top up or challenge. */
+  const canReclaim =
+    s.state !== 'settled' &&
+    BigInt(s.received) > 0n &&
+    !s.fully_funded &&
+    (!s.record_bound || deadlinePassed);
+
+  async function doReclaim() {
+    const accountSigner = await signer();
+    setPending('reclaim');
+    await submit(() => reclaimFunds(s.escrow_id, { account: accountSigner }), {
+      action: 'Reclaim funds',
+      onSuccess: () => {
+        toast.push(
+          'Refund started',
+          'The collected GEN is on its way back to the payer; anyone can confirm it once it lands.',
+          'success',
+        );
+        setPending(null);
+        reset();
+      },
+    });
+    setPending(null);
+  }
   const parsedRecordId = Number(recordId);
   const recordIdValid = Number.isInteger(parsedRecordId) && parsedRecordId >= 0;
 
@@ -399,9 +428,10 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
             </>
           ) : (
             <>
-              {formatGen(s.amount)} was agreed but {formatGen(s.received)} was collected. The
-              decision still settles, but no payout goes out — an escrow is never paid out of the
-              contract's shared pot, only from what was collected against it.
+              {formatGen(s.amount)} was agreed but {formatGen(s.received)} was collected. Settle
+              refuses until the gap is closed — deciding short would strand the escrow with no
+              top-up and no refund — so an escrow is never paid out of the contract's shared
+              pot, only from what was collected against it.
             </>
           )}
         </p>
@@ -439,6 +469,43 @@ function SettlementBody({ settlement: s }: { settlement: Settlement }) {
             )}
           </>
         )}
+        {canReclaim && (
+          <>
+            <p className="notice__body">
+              {s.record_bound
+                ? 'The dispute window has closed and this escrow can never pay out, so the payer can take back what was collected.'
+                : 'This escrow was never bound to a notarization, so the payer can take back what was collected at any time.'}{' '}
+              The refund goes through the same delivery tracking as any payout.
+            </p>
+            {isPayer ? (
+              <div className="cluster" style={{ marginTop: 'var(--s-3)' }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={doReclaim}
+                  disabled={busy}
+                >
+                  {pending === 'reclaim' && busy
+                    ? 'Reclaiming…'
+                    : `Reclaim ${formatGen(BigInt(s.received))}`}
+                </button>
+              </div>
+            ) : (
+              <p className="notice__body">Only the payer can reclaim this.</p>
+            )}
+          </>
+        )}
+        {!canReclaim &&
+          !s.fully_funded &&
+          s.state !== 'settled' &&
+          BigInt(s.received) > 0n &&
+          s.record_bound &&
+          !deadlinePassed && (
+            <p className="notice__body">
+              Reclaim opens once the dispute window closes — until then the worker can still
+              close the gap or challenge.
+            </p>
+          )}
       </div>
 
       {/* ------------------------------------------------------------ terms */}

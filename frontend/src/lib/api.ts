@@ -281,6 +281,14 @@ export const recoverPayout = (escrowId: number, opts: WriteOpts = {}): Promise<H
 export const retryPayout = (escrowId: number, opts: WriteOpts = {}): Promise<Hex> =>
   write(SETTLEMENT, 'retry_payout', [escrowId], opts.account, opts.leaderOnly ?? false);
 
+/** Refund collected GEN to the payer from an escrow that can never pay.
+ *
+ *  Payer-only, and only while unsettled and short of the agreed amount: open
+ *  escrows reclaim immediately, attested ones once the dispute window closes.
+ *  The refund reuses the payout machine, so confirm/recover/retry apply. */
+export const reclaimFunds = (escrowId: number, opts: WriteOpts = {}): Promise<Hex> =>
+  write(SETTLEMENT, 'reclaim_funds', [escrowId], opts.account, opts.leaderOnly ?? false);
+
 export const setPayoutGrace = (seconds: number, opts: WriteOpts = {}): Promise<Hex> =>
   write(SETTLEMENT, 'set_payout_grace_seconds', [seconds], opts.account, opts.leaderOnly ?? false);
 

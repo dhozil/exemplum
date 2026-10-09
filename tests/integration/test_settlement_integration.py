@@ -176,7 +176,7 @@ def test_challenge_requires_a_notarization(escrow, notary):
 # --- happy path: confirmed verdict pays the worker ------------------------
 
 @pytest.mark.slow
-def test_confirmed_notarization_pays_the_worker(escrow, notary):
+def test_confirmed_notarization_decides_but_settle_refuses_unfunded(escrow, notary):
     escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
     record_id = notarize(notary, TRUE_CLAIM)
     assert notary.get_record(args=[record_id]).call()["verdict"] == "confirmed"
@@ -188,22 +188,20 @@ def test_confirmed_notarization_pays_the_worker(escrow, notary):
     assert tx_execution_succeeded(escrow.attach_notarization(args=[escrow_id, record_id]).transact())
     assert escrow.get_settlement(args=[escrow_id]).call()["outcome"] == "pay_worker"
 
-    assert tx_execution_succeeded(escrow.settle(args=[escrow_id]).transact())
-    settled = escrow.get_settlement(args=[escrow_id]).call()
-    assert settled["state"] == "settled"
-    assert settled["outcome"] == "pay_worker"
-    assert settled["verdict"] == "confirmed"
-    assert settled["settled_at"]
-
     # This escrow is deliberately left unfunded, so the agreed amount was
-    # recorded but nothing was collected. The contract must therefore settle the
-    # decision WITHOUT queueing a payout: an unfunded escrow is never claimable
-    # by a settler. (Native value does work on StudioNet — the money path is
-    # covered separately, in test_value_transfer.py.)
-    assert settled["amount"] == AMOUNT
-    assert settled["received"] == 0
-    assert settled["fully_funded"] is False
-    assert settled["transfer_emitted"] is False
+    # recorded but nothing was collected. Settling it would strand the decision
+    # in an unpayable dead end (funding closes at settlement), so `settle`
+    # refuses instead: no premature settlement. (Native value does work on
+    # StudioNet - the funded money path is covered live in
+    # tests/adversarial/prove_recovery.py.)
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
+    s = escrow.get_settlement(args=[escrow_id]).call()
+    assert s["state"] == "attested", "refused settle changes nothing"
+    assert s["outcome"] == "pay_worker"
+    assert s["amount"] == AMOUNT
+    assert s["received"] == 0
+    assert s["fully_funded"] is False
+    assert s["transfer_emitted"] is False
 
     pending = [json.loads(r) for r in escrow.get_pending_payouts(args=[0, 50]).call()]
     assert [p for p in pending if p["escrow_id"] == escrow_id] == []
@@ -228,7 +226,7 @@ def test_notarization_for_another_claim_cannot_be_attached(escrow, notary):
 
 
 @pytest.mark.slow
-def test_refuted_notarization_refunds_the_payer(escrow, notary):
+def test_refuted_notarization_decides_but_settle_refuses_unfunded(escrow, notary):
     escrow_id = open_escrow(escrow, notary, FALSE_CLAIM)
     record_id = notarize(notary, FALSE_CLAIM)
     assert notary.get_record(args=[record_id]).call()["verdict"] == "refuted"
@@ -236,10 +234,12 @@ def test_refuted_notarization_refunds_the_payer(escrow, notary):
     assert tx_execution_succeeded(escrow.attach_notarization(args=[escrow_id, record_id]).transact())
     assert escrow.get_settlement(args=[escrow_id]).call()["outcome"] == "refund_payer"
 
-    assert tx_execution_succeeded(escrow.settle(args=[escrow_id]).transact())
-    settled = escrow.get_settlement(args=[escrow_id]).call()
-    assert settled["state"] == "settled"
-    assert settled["outcome"] == "refund_payer"
+    # No GEN was ever collected, so there is nothing to refund and no decision
+    # to finalize into a dead end: `settle` refuses an unfunded escrow.
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
+    s = escrow.get_settlement(args=[escrow_id]).call()
+    assert s["state"] == "attested"
+    assert s["outcome"] == "refund_payer"
 
 
 # --- dispute path ----------------------------------------------------------
@@ -260,9 +260,10 @@ def test_challenge_and_reevaluation_reach_the_notary(escrow, notary):
 
     assert tx_execution_succeeded(escrow.request_reevaluation(args=[escrow_id]).transact())
 
-    # a settled escrow is closed to disputes
-    assert tx_execution_succeeded(escrow.settle(args=[escrow_id]).transact())
-    assert tx_execution_failed(escrow.challenge(args=[escrow_id, "too late"]).transact())
+    # No settlement is possible here (this harness cannot fund), so disputes
+    # stay open: a refused settle closes nothing.
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
+    assert tx_execution_succeeded(escrow.challenge(args=[escrow_id, "still open"]).transact())
 
 
 # --- introspection ---------------------------------------------------------
@@ -383,11 +384,12 @@ def test_refresh_picks_up_a_verdict_the_notary_moved(escrow, notary):
 
 
 @pytest.mark.slow
-def test_settle_reads_the_current_verdict_even_without_a_refresh(escrow, notary):
-    """`settle` must not trust the stored copy.
-
-    This is the belt to `refresh_verdict`'s braces: nobody has to remember to
-    call it, because settle re-derives from the notary regardless.
+def test_refresh_records_the_revision_settle_would_use(escrow, notary):
+    """`settle` re-reads the notary rather than trusting the stored copy, and
+    `refresh_verdict` is the read-only form of the same re-read. This harness
+    cannot fund, so `settle` is refused here; `refresh_verdict` proves the
+    revision tracking instead: it records the revision it settled on, so the
+    audit trail shows which conclusion would release the money.
     """
     escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
     record_id = notarize(notary, TRUE_CLAIM)
@@ -398,13 +400,13 @@ def test_settle_reads_the_current_verdict_even_without_a_refresh(escrow, notary)
     )
     assert tx_execution_succeeded(notary.re_evaluate(args=[record_id]).transact())
 
-
-    # No refresh_verdict call. settle still re-reads and records the revision it
-    # settled on, so the audit trail shows which conclusion released the money.
-    assert tx_execution_succeeded(escrow.settle(args=[escrow_id]).transact())
-    settled = escrow.get_settlement(args=[escrow_id]).call()
-    assert settled["state"] == "settled"
-    assert settled["bound_revision"] == notary.get_record(args=[record_id]).call()["revision"]
+    # `settle` is refused without funds, so `refresh_verdict` performs the
+    # re-read instead and records the revision, exactly as `settle` would.
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
+    assert tx_execution_succeeded(escrow.refresh_verdict(args=[escrow_id]).transact())
+    refreshed = escrow.get_settlement(args=[escrow_id]).call()
+    assert refreshed["state"] == "attested"
+    assert refreshed["bound_revision"] == notary.get_record(args=[record_id]).call()["revision"]
 
 
 @pytest.mark.slow
@@ -454,14 +456,18 @@ def test_the_cooldown_holds_on_a_real_network(escrow, notary):
 
 
 @pytest.mark.slow
-def test_a_settled_escrow_cannot_be_refreshed(escrow, notary):
+def test_refused_settle_keeps_refresh_available(escrow, notary):
+    """Settlement is unreachable without funds in this harness, so the refresh
+    side is what is exercised: an attested escrow whose settle was refused
+    stays open to verdict updates rather than freezing."""
     escrow_id = open_escrow(escrow, notary, TRUE_CLAIM)
     record_id = notarize(notary, TRUE_CLAIM)
     assert tx_execution_succeeded(escrow.attach_notarization(args=[escrow_id, record_id]).transact())
-    assert tx_execution_succeeded(escrow.settle(args=[escrow_id]).transact())
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
 
-    # The money has moved. Rewriting the verdict now would be a lie.
-    assert tx_execution_failed(escrow.refresh_verdict(args=[escrow_id]).transact())
+    # Still attested, so the verdict can be refreshed - nothing was finalized
+    # that refreshing would rewrite.
+    assert tx_execution_succeeded(escrow.refresh_verdict(args=[escrow_id]).transact())
 
 
 @pytest.mark.slow

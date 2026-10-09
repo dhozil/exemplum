@@ -224,14 +224,16 @@ export interface PendingPayout {
  *  Deliberately separate from `PendingPayout`: these are not payment
  *  instructions. Every escrow shares one GEN pool, so a settler acting on one
  *  would spend another escrow's money.
- */
+ *
+ *  Unreachable on pairs built with the funding guard in `settle` (which
+ *  refuses underfunded escrows) plus `reclaim_funds` (which refunds what was
+ *  collected): the list stays empty rather than hiding stranded GEN. */
 export interface UnfundedObligation {
   escrow_id: number;
   beneficiary: string;
   amount: number;
   received: number;
-  /** What is missing. `fund_settlement` refuses once settled, so this gap is
-   *  permanent. */
+  /** What is missing. */
   shortfall: number;
   outcome: Outcome;
   settled_at: string;

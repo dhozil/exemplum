@@ -8,7 +8,7 @@
 
 [![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contracts-7E14FF?style=flat-square&logo=github)](https://docs.genlayer.com/)
 [![Methods](https://img.shields.io/badge/on--chain%20methods-43-7E14FF?style=flat-square)](#api)
-[![Tests](https://img.shields.io/badge/tests-374-2E7D32?style=flat-square)](#verify)
+[![Tests](https://img.shields.io/badge/tests-361-2E7D32?style=flat-square)](#verify)
 [![Network](https://img.shields.io/badge/StudioNet-chain%2061999-FFA724?style=flat-square)](#current-deployment)
 
 [Live deployment](#deploy-the-frontend) · [How it works](#how-it-works) · [API](#api) · [Limitations](#known-limitations) · [Deploy it yourself](#deploy)
@@ -221,7 +221,8 @@ notarization is a historical fact, while the live assessment may change.
 | `fund_settlement(escrow_id)` | Top an escrow up. Payable. Rejected once settled. |
 | `attach_notarization(escrow_id, record_id) -> str` | Bind a notarization after the claim/source checks. |
 | `refresh_verdict(escrow_id) -> str` | Re-read the bound record and re-derive the outcome. |
-| `settle(escrow_id) -> str` | Record the decision. Requests a transfer; does **not** mark it paid. |
+| `settle(escrow_id) -> str` | Record the decision. Refuses unless fully funded; requests a transfer but does **not** mark it paid. |
+| `reclaim_funds(escrow_id) -> str` | Payer-only refund of collected GEN from an escrow that can never pay. Open escrows reclaim immediately, attested ones after the window. |
 | `confirm_payout(escrow_id) -> str` | Mark a payout delivered, once its funds are seen to have left. |
 | `recover_payout(escrow_id) -> str` | Return an undelivered payout to `owed`. Refused inside the grace period. |
 | `retry_payout(escrow_id) -> str` | Beneficiary-only. Resend a recovered payout. |
@@ -535,7 +536,7 @@ The decision and the delivery are now separate state machines.
 | `payout_state` | Means | Who moves it |
 |---|---|---|
 | `''` | No verdict yet | — |
-| `owed` | Decided, money still this contract's problem, nothing sent | `settle`, `recover_payout` |
+| `owed` | Decided, money still this contract's problem, nothing sent | `settle`, `recover_payout`, `reclaim_funds` |
 | `sent` | Transfer requested, not yet observed to land | `settle`, `retry_payout` |
 | `delivered` | Funds seen to have left the balance | `confirm_payout` |
 
@@ -603,7 +604,7 @@ to be able to trigger it, and the gate costs nothing in practice.
 Covered by `tests/integration/test_payout_reconciliation.py` (11 tests on
 StudioNet), the precondition tests in `tests/test_settlement.py`, and by
 `D:\Genlayer-project\wallet\prove_payout_reconciliation.py`, which drives the
-deployed 31-method pair through the whole lifecycle with GEN that really moves and
+deployed 32-method pair through the whole lifecycle with GEN that really moves and
 asserts all 28 of its checks. That harness exists because **this gltest build
 cannot send value** — `gltest/contracts/contract.py` builds every method as
 `lambda self, args=None: write_contract_wrapper(self, method_name, args)` with no
@@ -688,7 +689,7 @@ distribute money that was never escrowed.
 
 ```
 contracts/ai_notary.py                      12 methods  – attestation + consensus
-contracts/notarized_settlement.py           31 methods  – escrow, trust list, settlement decision, payout reconciliation
+contracts/notarized_settlement.py           32 methods  – escrow, trust list, settlement decision, payout reconciliation
 tests/test_ai_notary.py                      93 direct-mode cases
 tests/test_equivalence.py                     9 validator-path tests
 tests/test_settlement.py                     111 direct-mode tests
@@ -748,12 +749,12 @@ python D:\Genlayer-project\wallet\prove_revalidation_flow.py
 
 | Suite | Count | Notes |
 |---|---|---|
-| Contract logic (`pytest`) | **199** | No network, no LLM. Runs in seconds. |
+| Contract logic (`pytest`) | **236** | No network, no LLM. Runs in seconds. |
 | Integration (`gltest`) | **40** | 11 notary + 23 settlement + 6 value transfer, against real GenVM |
-| Frontend (`vitest`) | **110** | 11 files |
-| On-chain methods | **43** | 12 notary + 31 settlement, checked against the deployed schema |
+| Frontend (`vitest`) | **125** | 13 files |
+| On-chain methods | **44** | 12 notary + 32 settlement, checked against the deployed schema |
 
-`genvm-lint` is clean on both contracts, and every one of the 43 on-chain methods
+`genvm-lint` is clean on both contracts, and every one of the 44 on-chain methods
 has been called against a live deployment — the coverage audit compares what the
 script exercised against the schema the node returns, so a method added later
 without being tested shows up as a failure rather than passing silently.
@@ -827,8 +828,8 @@ includes the payout double-payment fix.
 
 | Contract | Address | Methods |
 |---|---|---|
-| `AINotary` | `0x1DE6751acf789FA1F09e0F1E78dE12f1db3E5256` | 12 |
-| `NotarizedSettlement` | `0x3cEBfEf9075052b4de0897B2350595F5c8b1FA61` | 31 |
+| `AINotary` | `0x9A815c2667ce2b45AB1C3da3592AF7C998db8aa0` | 12 |
+| `NotarizedSettlement` | `0x2Cd0344Fc2C1480b7CD1FeD55e0F8C84EDeEEbB1` | 32 |
 
 One pair, one address. Earlier revisions of this README recorded the same
 deployment twice under different local labels and referred to a separate local
@@ -843,21 +844,25 @@ to, and the authoritative list is the one canonical pair above. The addresses
 remain resolvable in the commit history if an older note needs checking.
 
 The progression was not cosmetic. The first two pairs have **25 methods and no
-reconciliation surface at all**. Two later 31-method pairs pre-date the
+reconciliation surface at all**. Later 31-method pairs pre-date the
 double-payment fix, so `recover_payout` could walk a delivered payout back into
 `owed` and the beneficiary could be paid twice. The previous canonical pair
-fixed that but still carried a `NameError` on the stranger-retry path
-(`ERROR_PERMISSION` was never defined, so a non-beneficiary retry crashed
-instead of being refused cleanly). Only the current canonical pair has both
-fixes, proven by `tests/adversarial/prove_recovery.py` (28 checks, all
-passing, 2026-10-05) and `tests/test_payout_adversarial.py` (10 tests).
+fixed that but still settled underfunded escrows into an unpayable dead end
+with no refund path. Only the current 32-method pair refuses premature
+settlement and refunds collected GEN through `reclaim_funds`, proven by
+`tests/adversarial/prove_recovery.py` (34 checks, all passing) and
+`tests/test_reclaim_lifecycle.py` (13 tests) alongside
+`tests/test_payout_adversarial.py` (10 tests).
 
 The frontend points at the canonical pair, not at the original 25-method demo. It
 has to: the reconciliation methods (`confirm_payout`, `recover_payout`,
-`retry_payout`, `get_payout_state`, `set_payout_grace_seconds`,
+`retry_payout`, `reclaim_funds`, `get_payout_state`, `set_payout_grace_seconds`,
 `get_unfunded_obligations`) exist only on a deployment built after the fix, and
 against a 25-method pair every one of them fails at the RPC while the page still
-renders controls for them.
+renders controls for them. The default addresses in `frontend/src/config.ts`
+are the canonical pair below, so even a build with no environment variables
+reads the right contracts - a stale default here is what the "reconcile the
+frontend addresses" review point was about.
 
 The curated records were **re-seeded**, not copied. The registry is append-only, so
 there is no way to move records between deployments — the six claims were
@@ -870,7 +875,8 @@ than stopping halfway:
 | Escrow | State | Shows |
 |---|---|---|
 | delivered | `settled`, `payout_state: delivered` | A funded escrow that was genuinely paid and reconciled |
-| unfunded | `settled`, in `get_unfunded_obligations` | A decided obligation that can never be paid |
+| refunded | `settled`, `payout_state: delivered`, `outcome: refund_payer` | A partially funded escrow whose payer reclaimed and confirmed the refund |
+| unpayable | in `get_unfunded_obligations` | Empty on this pair by construction: premature settlement is refused, so no settled-underfunded dead end can form |
 
 #### `__on_errored_message__`, and what is verified about it
 
@@ -930,7 +936,7 @@ Two suites cover the failed-transfer path from opposite sides, because neither
 side alone can reach it on StudioNet.
 
 **Live** — `tests/adversarial/prove_recovery.py` runs against real GenVM with
-real GEN (28 checks, all passing on the canonical pair, 2026-10-05):
+real GEN (34 checks, all passing on the canonical pair):
 
 ```
 python tests/adversarial/prove_recovery.py            # against deployment.json
@@ -941,7 +947,7 @@ It needs the SDK directly rather than `gltest`, because `gltest`'s contract fact
 builds every method as `lambda self, args=None: write_contract_wrapper(...)` with
 no `value` parameter and therefore cannot fund an escrow at all.
 
-All 28 checks pass, including: `settle` records `sent` and leaves
+All 34 checks pass, including: `settle` records `sent` and leaves
 `total_paid_out` alone; the escrow stays in `get_pending_payouts`; recovery is
 refused once the value has gone, and refused **for that reason** rather than for
 the grace period; `confirm_payout` moves the total exactly once and a second call

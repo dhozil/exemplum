@@ -13,7 +13,7 @@ It moves real GEN, because the whole question is what happens to value.
 no ``value`` parameter threaded through. So this drives the SDK directly with a
 funded key, the same way any external settler would.
 
-What it proves, in order:
+What it proves, in order (34 checks):
 
 1.  ``settle`` does not claim a payment. It records ``sent`` and leaves
     ``total_paid_out`` at zero, because an external ``emit_transfer`` with
@@ -21,43 +21,43 @@ What it proves, in order:
     finalizes - so at the moment ``settle`` returns, no money has moved.
 2.  The escrow stays in ``get_pending_payouts`` until delivery is confirmed.
 3.  A payout whose funds have gone cannot be recovered, and cannot be resent.
-4.  A payout whose funds are still in the contract *can* be recovered, and the
-    recovered escrow is an obligation again rather than a lost one.
+4.  Premature settlement is refused (unfunded and partially funded alike),
+    and the payer reclaim refunds collected GEN whole: half of AMOUNT goes
+    in and comes back exactly, confirmed once, gone from the outstanding
+    list.
 5.  Only the beneficiary may resend, and a resend is recorded as a second
     attempt.
-6.  ``confirm_payout`` moves ``total_paid_out`` exactly once.
+6.  ``confirm_payout`` moves ``total_paid_out`` exactly once, the payee gains
+    exactly one payment, and the books balance with nothing unattributed.
 
 One honest limit, stated here rather than discovered later
 -----------------------------------------------------------
-Step 4 recovers a payout whose transfer is **still in flight**, not one whose child
-transaction has already errored and handed its value back. Those are the two
-states the grace period exists to keep apart, and only the second one is a
-"returned funds" failure.
+`recover_payout` on a `sent` escrow whose funds are still present cannot be
+driven here: the only such moment is between the child being created and it
+resolving (~15s), shorter than one write round-trip (15-20s), so by the time
+the call lands the value has left and recovery is correctly refused as
+delivered. Step 5 asserts those refusals for the right reasons instead.
 
-The distinction is not cosmetic, so it is worth being exact about why the true
-version cannot be driven here. Producing a child transfer that fails needs a
-recipient that cannot receive value, and on StudioNet there is none reachable:
+The reachable recovery is the payer reclaim (step 4): an escrow that can
+never pay returns its collected GEN through the same payout machine, and the
+deterministic suite (`tests/test_reclaim_lifecycle.py`) covers the
+`recover_payout` success branch that live timing cannot reach.
 
-- an externally-owned account accepts a transfer;
-- so does an Intelligent Contract's ghost contract - paying a deployed
-  ``AINotary`` delivered 1 GEN, measured, despite ``__receive__`` being
-  unavailable on the runner, which had been read as meaning such a transfer would
-  raise;
-- and this contract's own invariants close the remaining door: ``received`` is
-  capped at ``amount`` and there is no withdrawal, so the balance can never be
-  short of a pending transfer.
+A child transfer that genuinely fails has no reachable trigger on StudioNet
+(an EOA accepts value, and so does an IC ghost contract - measured), and
+`tests/adversarial/probe_hook_fire.py` established worse: a 1 GEN call to a
+method that reverts still credited the recipient while the hook never fired.
+So "returned funds" arrives via reclaim, not via a failing child, on this
+network.
 
 An earlier attempt closed the gap with an owner-only method that told the contract
 to believe the value had come back. That was removed. It made a delivered payout
 recoverable and let the owner pay a beneficiary twice out of the shared pool, and
 a submitted contract should not carry a method like that for the sake of a test.
 
-So the grace period is set to zero for step 4, deliberately: it disables the
-in-flight protection so the recovery machinery can be exercised, and the test
-says so rather than presenting an in-flight recovery as a returned-funds one.
-Step 3 covers the other side - funds genuinely gone, recovery refused - and steps
-4 and 5 together are what "exactly once" means: the obligation can be recovered
-while the money is still here, and cannot be recovered once it is not.
+So the grace period is set to zero where a refusal must be attributable to
+the balance rather than the wait, deliberately, and the test says so rather
+than presenting an in-flight recovery as a returned-funds one.
 """
 
 import json
@@ -100,7 +100,7 @@ def check(label, cond, detail=""):
 
 def receipt(tx):
     exe = shutil.which("genlayer.cmd") or shutil.which("genlayer")
-    for _ in range(5):
+    for _ in range(12):
         p = subprocess.run([exe, "receipt", tx], capture_output=True, text=True,
                            timeout=900, encoding="utf-8", errors="replace")
         out = (p.stdout or "") + (p.stderr or "")
@@ -108,7 +108,7 @@ def receipt(tx):
         if ex:
             pl = re.search(r"payload:\s*'([^']*)'", out)
             return ex.group(1), (pl.group(1) if pl else "")
-        time.sleep(5)
+        time.sleep(10)
     return None, ""
 
 
@@ -153,8 +153,16 @@ def main() -> None:
         last = None
         for i in range(tries):
             try:
-                return receipt(c.write_contract(addr, method, account=payer,
-                                                args=args, value=value))
+                ex, pl = receipt(c.write_contract(addr, method, account=payer,
+                                                  args=args, value=value))
+                if ex is None:
+                    # Receipt never resolved (overloaded network), not a
+                    # refusal: retry rather than record a false ERROR.
+                    print(f"  {method} receipt unresolved, retry {i + 1}/{tries}",
+                          flush=True)
+                    time.sleep(20 * (i + 1))
+                    continue
+                return ex, pl
             except Exception as exc:
                 last = exc
                 if not transient(exc):
@@ -203,7 +211,7 @@ def main() -> None:
             time.sleep(3)
     if not schema:
         raise SystemExit("settlement schema never became available")
-    check("settlement exposes 31 methods", len(schema.get("methods", {})) == 31,
+    check("settlement exposes 32 methods", len(schema.get("methods", {})) == 32,
           len(schema.get("methods", {})))
     check("no simulation method is published",
           "simulate_returned_payout" not in schema.get("methods", {}))
@@ -272,36 +280,61 @@ def main() -> None:
           not any(json.loads(r)["escrow_id"] == e1
                   for r in read(settlement, "get_pending_payouts", [0, 50])))
 
-    # -- 4. `owed` is reachable, and it is a live obligation -----------------
-    print("\n4. `owed` is a real, reachable state")
-    # An underfunded escrow settles to `owed` without emitting anything, which is
-    # the one way to reach that state deterministically on this network.
-    e_owed = next_escrow()
+    # -- 4. premature settlement is refused; open reclaim refunds live -----
+    print("\n4. premature settle is refused, and the payer reclaim works live")
+    # An unfunded decision used to settle into `owed`, unpayable forever. Now
+    # settle refuses, so every collected wei stays on an enforceable path.
+    e_bare = next_escrow()
     write(settlement, "open_settlement", [payee.address, notary, CLAIM, SOURCES,
                                           AMOUNT, 7])
     write(notary, "notarize", ["api_data", CLAIM, SOURCES])
     rec = int(read(notary, "get_stats", [])["total"]) - 1
-    write(settlement, "attach_notarization", [e_owed, rec])
-    write(settlement, "settle", [e_owed])
-    po = read(settlement, "get_payout_state", [e_owed])
-    check("an unfunded decision settles to `owed`", po["payout_state"] == "owed",
-          po["payout_state"])
-    check("with no attempt made", po["attempts"] == 0, po["attempts"])
-    check("and no transfer requested", po["delivered"] is False)
-    # Not in get_pending_payouts, and correctly so: that list is payment
-    # instructions and requires `received >= amount`, so a settler must never
-    # pay an escrow that collected nothing. It belongs in the other view.
-    check("and it is NOT a payment instruction",
-          not any(json.loads(r)["escrow_id"] == e_owed
+    write(settlement, "attach_notarization", [e_bare, rec])
+    ex, pl = write(settlement, "settle", [e_bare])
+    check("unfunded settle refused", ex != "SUCCESS", ex)
+    check("for lack of funding, not for anything else",
+          pl and "fully funded" in pl, (pl or "")[:60])
+    check("attested, nothing emitted, nothing booked",
+          read(settlement, "get_settlement", [e_bare])["state"] == "attested")
+    check("absent from payment instructions",
+          not any(json.loads(r)["escrow_id"] == e_bare
                   for r in read(settlement, "get_pending_payouts", [0, 50])),
           "absent from get_pending_payouts")
-    unfunded = [json.loads(r) for r in read(settlement, "get_unfunded_obligations", [0, 50])]
-    row = next((r for r in unfunded if r["escrow_id"] == e_owed), None)
-    check("it is surfaced as an unpayable obligation instead",
-          row is not None and row["payable"] is False,
-          f"shortfall={row['shortfall'] if row else 'n/a'}")
-    ex, _ = write(settlement, "retry_payout", [e_owed])
-    check("but cannot be sent: nothing was funded", ex != "SUCCESS", ex)
+    check("no dead-end obligation created",
+          not any(json.loads(r)["escrow_id"] == e_bare
+                  for r in read(settlement, "get_unfunded_obligations", [0, 50])),
+          "absent from get_unfunded_obligations")
+
+    # Partial funding, then the payer reclaim: open (no verdict bound), so no
+    # window to wait out. Half of AMOUNT goes in and must come back whole.
+    e_part = next_escrow()
+    write(settlement, "open_settlement", [payee.address, notary, CLAIM, SOURCES,
+                                          AMOUNT, 7], value=AMOUNT // 2)
+    ex, pl = write(settlement, "settle", [e_part])
+    check("partially funded settle refused too", ex != "SUCCESS", ex)
+    payer_before = bal(payer.address)
+    paid_before = int(read(settlement, "get_fund_conservation", [])["total_paid_out"])
+    ex, pl_txt = write(settlement, "reclaim_funds", [e_part])
+    check("payer reclaim accepted", ex == "SUCCESS", (ex, pl_txt))
+    st = read(settlement, "get_payout_state", [e_part])
+    check("refund in flight or waiting, never booked as paid",
+          st["payout_state"] in ("sent", "owed"), st["payout_state"])
+    time.sleep(10)
+    write(settlement, "confirm_payout", [e_part])
+    # Contract-exact: the books must move by precisely the collected half.
+    # The payer's chain balance is only directional evidence here - it also
+    # pays chain gas, so an exact wei comparison against it is meaningless
+    # (measured: chain reads do not net to the refund figure exactly).
+    check("books moved by exactly the collected half",
+          int(read(settlement, "get_fund_conservation", [])["total_paid_out"]) - paid_before
+          == AMOUNT // 2,
+          f"{paid_before} -> {read(settlement, 'get_fund_conservation', [])['total_paid_out']}")
+    check("payer balance rose (directional; net of gas)",
+          bal(payer.address) > payer_before,
+          f"{bal(payer.address) - payer_before} wei")
+    check("refund left the outstanding list",
+          not any(json.loads(r)["escrow_id"] == e_part
+                  for r in read(settlement, "get_pending_payouts", [0, 50])))
 
     # -- 5. every recovery guard holds --------------------------------------
     print("\n5. every recovery guard holds")

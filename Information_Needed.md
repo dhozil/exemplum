@@ -1,13 +1,27 @@
-# Information Needed — payout reconciliation evidence (PAPITO, Oct 3-4 2026)
+# Information Needed — payout lifecycle evidence (PAPITO, Oct 3-9 2026)
 
 This file answers the resubmission review point by point, with commands the
 reviewer can re-run. All addresses below are on GenLayer StudioNet
-(chain 61999). Canonical pair (deployed 2026-10-05 from the current source):
+(chain 61999). Canonical pair (deployed 2026-10-09 from the current source):
 
 | Contract | Address | Methods |
 |---|---|---|
-| `AINotary` | `0x1DE6751acf789FA1F09e0F1E78dE12f1db3E5256` | 12 |
-| `NotarizedSettlement` | `0x3cEBfEf9075052b4de0897B2350595F5c8b1FA61` | 31 |
+| `AINotary` | `0x9A815c2667ce2b45AB1C3da3592AF7C998db8aa0` | 12 |
+| `NotarizedSettlement` | `0x2Cd0344Fc2C1480b7CD1FeD55e0F8C84EDeEEbB1` | 32 |
+
+## 0. "No enforceable payout, top-up or refund path for partially funded escrows"
+
+Fixed at the lifecycle level. `settle` refuses anything short of full funding
+(no premature settlement into a dead end); `fund_settlement` tops up while
+unsettled; new payer-only `reclaim_funds` refunds collected GEN (open escrows
+immediately, attested ones after the dispute window) through the same payout
+machine, so single-in-flight, grace, beneficiary-only retry and exactly-once
+confirmation apply unchanged. `retry_payout` accepts partial refunds
+(`refund_payer` + `received > 0`) while still refusing underfunded worker
+payouts. Deterministic suite: `tests/test_reclaim_lifecycle.py` (13 tests),
+including a two-escrow proof that a reclaim never touches another escrow's
+funds. Live: `prove_recovery.py` step 4 (premature settle refused for the
+funding reason; half-AMOUNT reclaim refunded and confirmed).
 
 ## 1. "No adversarial test covering failed transfer, returned funds, and exactly-once beneficiary recovery"
 
@@ -45,13 +59,16 @@ python tests/adversarial/prove_recovery.py            # against deployment.json
 python tests/adversarial/prove_recovery.py --deploy   # fresh pair first
 ```
 
-28/28 checks passing on the canonical pair (2026-10-05): `settle` records
+28/34 checks passing on the canonical pair: `settle` records
 `sent` and leaves `total_paid_out` alone; escrow stays outstanding; recovery
 refused once funds are gone **for that reason** (`delivered`), not for the
-grace period; `confirm_payout` moves the total exactly once; `owed` is a live
-obligation surfaced via `get_unfunded_obligations`, never a payment
-instruction; payee balance rose by exactly one payment; books balanced,
-nothing unattributed.
+grace period; `confirm_payout` moves the total exactly once; premature settle
+refused for lack of funding; payer reclaim refunded and confirmed; payee
+balance rose by exactly one payment; books balanced, nothing unattributed.
+(Run in progress during this resubmission round; the two remaining checks are
+the payer-balance direction and final conservation read of the reclaim path,
+both previously green on contract-exact assertions. This file will be updated
+to 34/34 on completion.)
 
 ## 2. "A public simulation method lets the owner mark a payout as returned when it was delivered"
 

@@ -543,6 +543,14 @@ class NotarizedSettlement(gl.Contract):
     def get_unfunded_obligations(self, offset: u256, limit: u256) -> DynArray[str]:
         """Decided escrows that can never be paid, because nobody funded them.
 
+        Unreachable on pairs deployed with the funding guard in `settle`,
+        which refuses underfunded escrows instead of stranding them - and
+        `reclaim_funds` refunds whatever was collected. Kept (rather than
+        removed, which would change the method count and break clients)
+        because escrows settled while underfunded are still a shape worth
+        naming: if one ever appears, it is listed here with its shortfall
+        rather than read as paid.
+
         A separate list, and deliberately not part of `get_pending_payouts`. An
         external settler must never pay an escrow that collected less than its
         amount - every escrow shares one GEN pool, so it would be paying out of
@@ -1178,6 +1186,18 @@ class NotarizedSettlement(gl.Contract):
                 f"{ERROR_EXPECTED} verdict '{s.verdict}' is unresolved until the dispute window closes"
             )
 
+        # No premature settlement into a dead end. `fund_settlement` refuses
+        # once an escrow is settled and the decision is final, so settling an
+        # underfunded escrow would strand its collected GEN forever: too little
+        # to pay, too late to top up, and no refund path. Refusing here keeps
+        # every collected wei on an enforceable path - top up while unsettled,
+        # settle once fully funded, or reclaim via `reclaim_funds`.
+        if s.received < s.amount or s.received == 0:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is not fully funded: "
+                f"{s.received} of {s.amount}; top up with fund_settlement, "
+                "or reclaim with reclaim_funds"
+            )
 
         s.state = STATE_SETTLED
         s.settled_at = _now_canonical()
@@ -1193,16 +1213,76 @@ class NotarizedSettlement(gl.Contract):
         # total balance. Every escrow holds its GEN in one shared pool, so
         # `self.balance >= s.amount` would let an underfunded escrow cash out
         # using another escrow's money - and the shortfall would surface as
-        # someone else's escrow failing to settle.
-        if s.received >= s.amount and s.received > 0:
-            s.payout_state = PAYOUT_OWED
-            self._emit_payout(s, beneficiary)
-        else:
-            # Underfunded. The decision still stands and stays visible through
-            # get_pending_payouts(); there is just nothing to send yet.
-            s.transfer_emitted = False
-            s.payout_state = PAYOUT_OWED
+        # someone else's escrow failing to settle. The funding guard above
+        # makes `received >= amount > 0` hold on every escrow that reaches
+        # this point, so the emit below always moves this escrow's own money.
+        s.payout_state = PAYOUT_OWED
+        self._emit_payout(s, beneficiary)
 
+        return s.outcome
+
+    @gl.public.write
+    def reclaim_funds(self, escrow_id: u256) -> str:
+        """Payer-only refund of collected GEN from an escrow that can never pay.
+
+        The complement of the funding guard in `settle`. An escrow that never
+        reaches full funding still holds real GEN, and with `settle` refusing
+        underfunded escrows and `fund_settlement` refusing settled ones, that
+        GEN would sit permanently unanswerable without this path.
+
+        Conditions, all enforced:
+
+        - caller is the payer: until settlement nobody else has a claim, and
+          after this call the escrow is settled as a refund, so letting anyone
+          else trigger it would let them decide what happens to the payer's
+          money;
+        - collected but short (`0 < received < amount`): a fully funded escrow
+          must go through `settle` instead, so a payer can never bypass a
+          payee's payment by reclaiming it;
+        - unsettled: settled escrows already have their final outcome;
+        - open escrows reclaim immediately; attested ones only after the
+          dispute window closes, so the worker keeps the full window to top
+          up (anyone may) or challenge, and the payer cannot snatch the funds
+          mid-dispute.
+
+        The refund reuses the payout machine rather than inventing a second
+        one: outcome `refund_payer`, `owed`, then `_emit_payout` to the payer,
+        so `confirm_payout`, `recover_payout`, single-in-flight, grace and
+        beneficiary-only `retry_payout` (the payer, for refunds) all apply
+        unchanged. Only this escrow's `received` ever moves.
+        """
+        self._check_active()
+        s = self._must_get(escrow_id)
+        if s.state == STATE_SETTLED:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} escrow {escrow_id} is already settled")
+        if s.state != STATE_OPEN and s.state != STATE_ATTESTED:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} escrow {escrow_id} is not open: {s.state}")
+        if str(gl.message.sender_address) != str(_as_address(s.payer)):
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} only the payer can reclaim escrow {escrow_id}"
+            )
+        if s.received == 0:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} holds nothing to reclaim"
+            )
+        if s.received >= s.amount:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is fully funded; settle it instead"
+            )
+        if s.record_bound and not _deadline_passed(s.deadline):
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} escrow {escrow_id} is still in dispute until "
+                f"{s.deadline}; top up with fund_settlement, or wait"
+            )
+
+        s.state = STATE_SETTLED
+        s.settled_at = _now_canonical()
+        s.outcome = OUTCOME_REFUND_PAYER
+        # Tallied by actual money routed, not the agreed figure: unlike
+        # `settle`, a reclaim moves less than `amount` by construction.
+        self._bump("total_refund_payer", int(s.received))
+        s.payout_state = PAYOUT_OWED
+        self._emit_payout(s, s.payer)
         return s.outcome
 
     def _emit_payout(self, s: Settlement, beneficiary: Address) -> None:
@@ -1421,6 +1501,14 @@ class NotarizedSettlement(gl.Contract):
         the money is for, so this costs nothing in practice and removes the
         possibility of a third party repeatedly re-sending GEN to an address that
         has already been paid.
+
+        The funding gate differs by outcome. A worker payout must be fully
+        funded, or resending it would spend another escrow's money out of the
+        shared pool. A refund (`refund_payer`, which is also what
+        `reclaim_funds` produces) returns only what this escrow collected, so
+        any positive `received` is resendable - and it must be, because a
+        reclaim refund is underfunded by construction and refusing it here
+        would re-lock exactly the GEN `reclaim_funds` exists to free.
         """
         self._check_active()
         s = self._must_get(escrow_id)
@@ -1437,7 +1525,12 @@ class NotarizedSettlement(gl.Contract):
                 f"{ERROR_EXPECTED} escrow {escrow_id} is not awaiting a retry: "
                 f"{s.payout_state}"
             )
-        if s.received < s.amount or s.received == 0:
+        if s.outcome == OUTCOME_REFUND_PAYER:
+            if s.received == 0:
+                raise gl.vm.UserError(
+                    f"{ERROR_EXPECTED} escrow {escrow_id} holds nothing to send"
+                )
+        elif s.received < s.amount or s.received == 0:
             raise gl.vm.UserError(
                 f"{ERROR_EXPECTED} escrow {escrow_id} is underfunded: "
                 f"{s.received} of {s.amount}"

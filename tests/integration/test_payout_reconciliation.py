@@ -2,32 +2,22 @@
 
     gltest tests/integration/test_payout_reconciliation.py -v -s --network studionet
 
-Requested by the project stewards. What this file covers, and what it does not,
-is worth being precise about.
-
 **This gltest build cannot send value.** `gltest/contracts/contract.py` builds
 every method as
 
     lambda self, args=None: write_contract_wrapper(self, method_name, args)
 
 with no `value` parameter threaded through, so no payable call in a gltest suite
-ever carries GEN. Every escrow opened here is therefore unfunded, which means it
-settles to `owed` and never reaches `sent`. That is why this file asserts the
+ever carries GEN. Every escrow opened here is therefore unfunded, which means
+`settle` refuses it (no premature settlement into an unpayable dead end) and
+`reclaim_funds` has nothing to refund. That is why this file asserts the
 *guards* and the *refusals*, and why the money itself is proved elsewhere:
 
-    D:\\Genlayer-project\\wallet\\prove_payout_reconciliation.py
+    tests/adversarial/prove_recovery.py
 
-That script drives the deployed pair through the whole lifecycle with 1 GEN that
-really moves: `settle` recording `sent` without moving `total_paid_out`, the
-grace period refusing a payout that may still be in flight, the payee's
-chain-layer balance actually rising, `confirm_payout` moving the number exactly
-once, a delivered payout refusing recovery, and a confirmed payout surviving a
-later top-up. It passes on the 30-method deployment.
-
-An earlier draft of this file asserted the money path here and failed on six
-tests, all with the same cause: `payout_state` came back `owed` where `sent` was
-expected, because the escrow held no GEN. That is the harness's limit, not the
-contract's behaviour, so the assertions moved rather than being deleted.
+That script drives the deployed pair through the whole lifecycle with GEN that
+really moves, including partial funding, premature-settle refusal, and the
+payer reclaim path end to end.
 """
 
 import json
@@ -77,13 +67,14 @@ def open_one(contract, notary, payee=PAYEE):
     return escrow_id
 
 
-def decided(contract, notary, payee=PAYEE):
-    """An escrow with a verdict attached and settled. Decided, never funded."""
+def attested(contract, notary, payee=PAYEE):
+    """An escrow with a verdict attached but no funds. Unfunded, because this
+    harness cannot send value - and therefore unsettleable: `settle` refuses
+    anything short of full funding rather than stranding it."""
     escrow_id = open_one(contract, notary, payee=payee)
     record_id = notary.get_stats(args=[]).call()["total"]
     assert tx_execution_succeeded(notary.notarize(args=["api_data", SPEC, SOURCES]).transact())
     assert tx_execution_succeeded(contract.attach_notarization(args=[escrow_id, record_id]).transact())
-    assert tx_execution_succeeded(contract.settle(args=[escrow_id]).transact())
     return escrow_id
 
 
@@ -120,61 +111,77 @@ def test_get_payout_state_on_a_missing_escrow_fails(escrow):
         escrow.get_payout_state(args=[9999]).call()
 
 
-# --- decision and delivery are separate -------------------------------------
+# --- no premature settlement ------------------------------------------------
 
 @pytest.mark.slow
-def test_settle_does_not_assert_delivery(escrow, notary):
-    """The steward finding, as an assertion.
+def test_settle_refuses_an_unfunded_escrow(escrow, notary):
+    """The partially funded lifecycle fix, as an assertion.
 
-    A decision must never be readable as a payment. This escrow is unfunded, so
-    the strongest form available here is that settling it produces `owed` and no
-    attempt at all - `attempts == 0` is the part that would have been `1` under
-    the old code for any escrow it tried to pay.
+    Settling an underfunded escrow used to strand its GEN: the decision was
+    final, `fund_settlement` refuses settled escrows, and there was no refund.
+    Now `settle` refuses outright, so every collected wei stays on an
+    enforceable path - top up while unsettled, settle once fully funded, or
+    reclaim. The escrow stays attested, nothing is emitted, nothing is booked.
     """
-    escrow_id = decided(escrow, notary)
+    escrow_id = attested(escrow, notary)
+
+    assert tx_execution_failed(escrow.settle(args=[escrow_id]).transact())
+
+    s = escrow.get_settlement(args=[escrow_id]).call()
+    assert s["state"] == "attested", "refused settle changes nothing"
+    assert s["transfer_emitted"] is False
 
     state = escrow.get_payout_state(args=[escrow_id]).call()
-    assert state["payout_state"] == "owed"
+    assert state["payout_state"] == ""
     assert state["attempts"] == 0
     assert state["delivered"] is False
 
-    s = escrow.get_settlement(args=[escrow_id]).call()
-    assert s["state"] == "settled", "the decision itself is final"
-    assert s["transfer_emitted"] is False, "and nothing was requested"
-
 
 @pytest.mark.slow
-def test_an_underfunded_decision_is_not_a_payment_instruction(escrow, notary):
+def test_an_unfunded_escrow_is_not_a_payment_instruction(escrow, notary):
     """A settler must never be told to pay an escrow that collected nothing.
 
     Every escrow shares one GEN pool, so paying an underfunded one out of the
-    contract's balance would spend another escrow's money - the bug the
-    `received >= amount` gate exists to prevent. So it is absent from
-    `get_pending_payouts`, which is a list of instructions.
+    contract's balance would spend another escrow's money. Unsettleable means
+    unlistable: it is absent from `get_pending_payouts`, which is a list of
+    instructions.
     """
-    escrow_id = decided(escrow, notary)
+    escrow_id = attested(escrow, notary)
 
     rows = [json.loads(r) for r in escrow.get_pending_payouts(args=[0, 50]).call()]
     assert all(r["escrow_id"] != escrow_id for r in rows)
 
 
 @pytest.mark.slow
-def test_an_underfunded_decision_is_surfaced_as_unpayable(escrow, notary):
-    """Excluded from the instructions, but not hidden.
-
-    `fund_settlement` refuses once an escrow is settled and the decision is
-    final, so an escrow decided while underfunded can never be paid. It used to
-    read as `settled`, be absent from the pending list, and be indistinguishable
-    from one that had been paid - a silent dead end for the payer's obligation.
-    """
-    escrow_id = decided(escrow, notary)
+def test_no_dead_end_obligations_are_creatable(escrow, notary):
+    """`get_unfunded_obligations` names the old dead-end shape: settled,
+    collected less than agreed, payable never. With premature settlement
+    refused, that shape is unreachable - the view stays empty rather than
+    papering over stranded GEN."""
+    attested(escrow, notary)
 
     rows = [json.loads(r) for r in escrow.get_unfunded_obligations(args=[0, 50]).call()]
-    row = next((r for r in rows if r["escrow_id"] == escrow_id), None)
-    assert row is not None, "a decided-but-unpayable obligation must be visible"
-    assert row["payable"] is False, "and must never look like a payment instruction"
-    assert row["shortfall"] == AMOUNT, "the gap is reported, not hidden"
-    assert row["received"] == 0
+    assert rows == []
+
+
+# --- reclaim guards (this harness cannot fund, so every reclaim here is
+# refused for having nothing to refund; the funded path runs live in
+# tests/adversarial/prove_recovery.py) ----------------------------------------
+
+@pytest.mark.slow
+def test_reclaim_refuses_an_empty_escrow(escrow, notary):
+    """No GEN collected, so no refund path is needed - and none is opened."""
+    escrow_id = attested(escrow, notary)
+
+    assert tx_execution_failed(escrow.reclaim_funds(args=[escrow_id]).transact())
+
+    s = escrow.get_settlement(args=[escrow_id]).call()
+    assert s["state"] == "attested", "refused reclaim changes nothing"
+
+
+@pytest.mark.slow
+def test_reclaim_refuses_a_missing_escrow(escrow):
+    assert tx_execution_failed(escrow.reclaim_funds(args=[9999]).transact())
 
 
 # --- the grace window --------------------------------------------------------
@@ -201,8 +208,8 @@ def test_nothing_is_unreconciled_on_a_fresh_contract(escrow):
 
 @pytest.mark.slow
 def test_nothing_is_reconciled_when_no_payout_was_ever_sent(escrow, notary):
-    """The guard's precondition, stated directly: a decided-but-unfunded escrow
+    """The guard's precondition, stated directly: an attested-but-unfunded escrow
     holds the reconciliation slot for nobody."""
-    escrow_id = decided(escrow, notary)
+    escrow_id = attested(escrow, notary)
 
     assert escrow.get_payout_state(args=[escrow_id]).call()["unreconciled_payouts"] == 0
