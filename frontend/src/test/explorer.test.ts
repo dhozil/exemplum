@@ -45,7 +45,7 @@ describe('explorer links', () => {
   });
 
   it('builds an address link', () => {
-    const addr = '0x6541E1eEa84d012ad6D5FB7393D8161b504071f3';
+    const addr = '0x2Cd0344Fc2C1480b7CD1FeD55e0F8C84EDeEEbB1';
     expect(explorerAddress(addr)).toBe(`${EXPLORER_URL}/address/${addr}`);
     expect(explorerAddress(addr)).not.toContain('//address/');
   });
