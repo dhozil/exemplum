@@ -99,17 +99,36 @@ def check(label, cond, detail=""):
 
 
 def receipt(tx):
-    exe = shutil.which("genlayer.cmd") or shutil.which("genlayer")
-    for _ in range(12):
-        p = subprocess.run([exe, "receipt", tx], capture_output=True, text=True,
-                           timeout=900, encoding="utf-8", errors="replace")
-        out = (p.stdout or "") + (p.stderr or "")
-        ex = re.search(r"execution_result:\s*'(\w+)'", out)
-        if ex:
-            pl = re.search(r"payload:\s*'([^']*)'", out)
-            return ex.group(1), (pl.group(1) if pl else "")
-        time.sleep(10)
-    return None, ""
+    # Pure-Python receipt polling (no `genlayer` CLI dependency): the CLI
+    # needs a local account entry that may not exist, while submission and
+    # reads go straight through the RPC.
+    import time as _time
+    last = None
+    for _ in range(40):
+        try:
+            t = _CLIENT.get_transaction(transaction_hash=tx)
+        except Exception as exc:
+            last = exc
+            _time.sleep(15)
+            continue
+        if (t.get("status_name") or t.get("status")) not in ("FINALIZED", "ACCEPTED"):
+            _time.sleep(15)
+            continue
+        try:
+            leaders = (t.get("consensus_data", {}) or {}).get("leader_receipt", []) or []
+            if not leaders:
+                _time.sleep(15)
+                continue
+            lr = leaders[0]
+            ex = lr.get("execution_result")
+            res = lr.get("result", {}) or {}
+            payload = res.get("payload", "") if isinstance(res, dict) else ""
+            if ex in ("SUCCESS", "ERROR"):
+                return ex, payload
+        except Exception as exc:
+            last = exc
+        _time.sleep(15)
+    return None, "receipt timeout: %s" % str(last)[:60]
 
 
 def transient(exc):
@@ -131,6 +150,8 @@ def main() -> None:
 
     payer = accounts.create_account(key)
     c = create_client(chain=studionet, account=payer)
+    global _CLIENT
+    _CLIENT = c
     payee = accounts.create_account()
     print(f"payer {payer.address}\npayee {payee.address}")
 

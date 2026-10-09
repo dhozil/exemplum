@@ -1,0 +1,13 @@
+== B1. premature settle ==
+[PASS] partial settle refused ('ERROR', '[EXPECTED] escrow 2 is not fully funded: 500000000000000000 of 100000
+[PASS] refused for funding [EXPECTED] escrow 2 is not fully funded: 500000000000000000 of 10000000000000000
+[PASS] still attested, nothing emitted {'amount': 1000000000000000000, 'bound_revision': 0, 'challenge_count': 0, 'conf
+== B2. reclaim guard ==
+[PASS] attested reclaim refused ('ERROR', '[EXPECTED] escrow 2 is still in dispute until 2026-10-16T08:25:01.519
+[PASS] refused for open window [EXPECTED] escrow 2 is still in dispute until 2026-10-16T08:25:01.519158; top up
+== C. open reclaim ==
+[PASS] open partial ('SUCCESS', {'raw': [25], 'readable': '3'})
+[PASS] open reclaim accepted ('SUCCESS', {'raw': [100, 114, 101, 102, 117, 110, 100, 95, 112, 97, 121, 101, 1
+[PASS] refund confirmed exactly once ('SUCCESS', 2000000000000000000, 2500000000000000000)
+conservation: {'balanced': True, 'escrows': 4, 'fully_accounted': True, 'funded_not_paid': 1, 'host_balance': 500000000000000000, 'host_minus_accounted': 0, 'outstanding': 500000000000000000, 'shortfall': 0, 'surplus': 0, 'total_paid_out': 2500000000000000000, 'total_received': 3000000000000000000, 'unattributed': 0}
+ALL GREEN

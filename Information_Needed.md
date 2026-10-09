@@ -70,6 +70,15 @@ the payer-balance direction and final conservation read of the reclaim path,
 both previously green on contract-exact assertions. This file will be updated
 to 34/34 on completion.)
 
+Worker-payee proof, closed separately because it needs its own escrow: escrow
+10 paid its fresh payee `0x2e54B8FF330b213635FDf0a9Ba6BEF32684Fa804` exactly
+1 GEN, chain-measured. Two measurement notes, both verified rather than
+assumed: immediately after delivery the payee read back 0 twice (stale reads
+on a fresh address), and only later indexed to exactly 10^18 wei - so the
+primary evidence is contract-exact (`total_paid_out` delta == `received`,
+`balanced`, `unattributed == 0`), with the chain balance as confirmation, not
+the other way round.
+
 ## 2. "A public simulation method lets the owner mark a payout as returned when it was delivered"
 
 That method (`simulate_returned_payout`) existed briefly, was removed, and is
