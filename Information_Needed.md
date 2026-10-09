@@ -86,7 +86,7 @@ absent from both the source and the chain:
 
 ```
 genvm-lint check contracts/notarized_settlement.py --json   # "methods": 31
-genlayer schema 0x3cEBfEf9075052b4de0897B2350595F5c8b1FA61  # 31 methods, no simulate_*
+genlayer schema 0x2Cd0344Fc2C1480b7CD1FeD55e0F8C84EDeEEbB1  # 32 methods, no simulate_*
 ```
 
 `tests/adversarial/prove_recovery.py` asserts its absence from the on-chain
